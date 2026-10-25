@@ -66,15 +66,28 @@ export const DeploymentGuideModal: React.FC<{ isOpen: boolean; onClose: () => vo
             <div className="flex items-center justify-between">
               <span className="font-bold text-amber-900 flex items-center gap-1.5">
                 <Flame className="w-4 h-4 text-amber-600" />
-                Current Status: {firebaseStatus.isConfigured ? 'Connected to Firestore' : 'Local Preview / Simulation Mode'}
+                Current Status: {firebaseStatus.isConfigured ? `Connected to ${firebaseStatus.projectId}` : 'Local Preview / Simulation Mode'}
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-200 text-amber-800">
-                {firebaseStatus.isConfigured ? 'Live Cloud' : 'Safe Standalone'}
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-200 text-emerald-900">
+                Live Cloud Active
               </span>
             </div>
             <p className="text-xs text-stone-600">
               {firebaseStatus.message}
             </p>
+            {firebaseStatus.isConfigured && (
+              <div className="pt-2 border-t border-amber-200/80">
+                <a
+                  href={`https://console.firebase.google.com/project/tastehub-16c49/firestore/databases/ai-studio-tastehubrestaura-3695d266-0af0-4fbc-92e0-8a7cb0eea600/data`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 hover:text-amber-900 underline"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Database in Firebase Console (Direct Link to Orders)</span>
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Android Phone Development Note */}

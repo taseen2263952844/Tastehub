@@ -11,7 +11,8 @@ import {
   query, 
   orderBy, 
   Firestore,
-  serverTimestamp
+  serverTimestamp,
+  getDocFromServer
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -23,6 +24,7 @@ import {
   Auth
 } from 'firebase/auth';
 import { MenuItem, Order, OrderStatus, FirebaseConnectionStatus } from '../types';
+import rawConfig from '../../firebase-applet-config.json';
 
 export enum OperationType {
   CREATE = 'create',
@@ -54,22 +56,21 @@ let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 
-// Determine if Firebase is configured in the environment
-// We check for Vite env variables or standard Firebase configuration
+// Determine if Firebase is configured
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)'
+  apiKey: rawConfig.apiKey || import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: rawConfig.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+  projectId: rawConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  storageBucket: rawConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: rawConfig.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: rawConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || '',
+  firestoreDatabaseId: rawConfig.firestoreDatabaseId || import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)'
 };
 
 const hasValidConfig = Boolean(
   firebaseConfig.apiKey && 
   firebaseConfig.projectId && 
-  firebaseConfig.apiKey !== 'MY_FIREBASE_API_KEY'
+  firebaseConfig.projectId !== 'remixed-project-id'
 );
 
 if (hasValidConfig) {
@@ -79,7 +80,8 @@ if (hasValidConfig) {
     } else {
       app = getApps()[0];
     }
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+    // CRITICAL: The app will break without this line
+    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
     auth = getAuth(app);
   } catch (error) {
     console.warn('Firebase initialization error:', error);
@@ -89,13 +91,26 @@ if (hasValidConfig) {
   }
 }
 
+// Validate Connection to Firestore per Skill guidelines
+async function testConnection() {
+  if (!db) return;
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration.");
+    }
+  }
+}
+testConnection();
+
 export const firebaseStatus: FirebaseConnectionStatus = {
   isConfigured: Boolean(db && auth),
   projectId: firebaseConfig.projectId || undefined,
   mode: Boolean(db && auth) ? 'real' : 'unconfigured',
   message: Boolean(db && auth) 
-    ? `Connected to Firebase Project "${firebaseConfig.projectId}"`
-    : 'Firebase is not yet configured. The app is running in Local Preview Mode with full interactive ordering and menu management. No fake connection is assumed.'
+    ? `Connected to Firebase Cloud Firestore Project: "${firebaseConfig.projectId}"`
+    : 'Firebase is not yet configured.'
 };
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
@@ -175,12 +190,33 @@ export async function createOrderInFirestore(order: Order): Promise<void> {
   const docPath = `orders/${order.id}`;
   try {
     const orderRef = doc(db, 'orders', order.id);
-    await setDoc(orderRef, {
-      ...order,
+    const sanitizedOrder: Record<string, any> = {
+      id: order.id,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      orderType: order.orderType,
+      paymentMethod: order.paymentMethod,
       items: JSON.stringify(order.items), // Native stringified payload adhering to schema
+      itemCount: order.itemCount,
+      subtotal: order.subtotal,
+      deliveryFee: order.deliveryFee,
+      totalAmount: order.totalAmount,
+      status: order.status,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    });
+    };
+
+    if (order.deliveryAddress) {
+      sanitizedOrder.deliveryAddress = order.deliveryAddress;
+    }
+    if (order.orderNotes) {
+      sanitizedOrder.orderNotes = order.orderNotes;
+    }
+    if (order.estimatedTimeMinutes !== undefined) {
+      sanitizedOrder.estimatedTimeMinutes = order.estimatedTimeMinutes;
+    }
+
+    await setDoc(orderRef, sanitizedOrder);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, docPath);
   }

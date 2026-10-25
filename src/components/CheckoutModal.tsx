@@ -37,6 +37,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash_on_delivery');
   
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   if (!isOpen) return null;
@@ -89,6 +90,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validateForm()) {
       showToast('Please fix the highlighted fields in the form.');
       return;
@@ -109,7 +111,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       onOrderSuccess();
     } catch (err: any) {
       setIsSubmitting(false);
-      showToast(err?.message || 'Failed to submit order. Please try again.');
+      const msg = err?.message || 'Failed to submit order to database.';
+      setSubmitError(msg);
+      showToast(msg);
     }
   };
 
@@ -139,6 +143,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmitOrder} className="p-5 sm:p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+          {/* Prominent Error Banner if Firestore or network rejected the write */}
+          {submitError && (
+            <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block font-bold">Order Not Saved to Database:</strong>
+                <span>{submitError}</span>
+              </div>
+            </div>
+          )}
           {/* Order Type Toggle: Delivery vs Pickup */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2">

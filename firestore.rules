@@ -36,21 +36,25 @@ service cloud.firestore {
     // Validation for MenuItem documents
     function isValidMenuItem(data) {
       return data.keys().hasAll(['name', 'category', 'price', 'description', 'isAvailable']) &&
-        data.keys().hasOnly(['id', 'name', 'category', 'price', 'description', 'imageUrl', 'isAvailable', 'spiceLevel', 'prepTimeMinutes', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'bengaliName', 'category', 'price', 'description', 'imageUrl', 'isAvailable', 'spiceLevel', 'prepTimeMinutes', 'isChefSpecial', 'portion', 'ingredients', 'createdAt', 'updatedAt']) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        (!('bengaliName' in data) || (data.bengaliName is string && data.bengaliName.size() <= 100)) &&
         data.category is string && (data.category in ['biryani-rice', 'curries', 'kebabs-bites', 'appetizers', 'desserts-drinks']) &&
         data.price is number && data.price >= 0 && data.price <= 50000 &&
         data.description is string && data.description.size() <= 500 &&
         data.isAvailable is bool &&
         (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
         (!('spiceLevel' in data) || (data.spiceLevel in ['Mild', 'Medium', 'Spicy', 'Extra Spicy'])) &&
+        (!('isChefSpecial' in data) || data.isChefSpecial is bool) &&
+        (!('portion' in data) || (data.portion is string && data.portion.size() <= 100)) &&
+        (!('ingredients' in data) || (data.ingredients is list && data.ingredients.size() <= 20)) &&
         (!('prepTimeMinutes' in data) || (data.prepTimeMinutes is number && data.prepTimeMinutes >= 0 && data.prepTimeMinutes <= 300));
     }
 
     // Validation for incoming customer orders
     function isValidOrder(data) {
       return data.keys().hasAll(['customerName', 'customerPhone', 'orderType', 'paymentMethod', 'items', 'subtotal', 'totalAmount', 'status', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'customerName', 'customerPhone', 'orderType', 'deliveryAddress', 'orderNotes', 'paymentMethod', 'items', 'itemCount', 'subtotal', 'deliveryFee', 'totalAmount', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'customerName', 'customerPhone', 'orderType', 'deliveryAddress', 'orderNotes', 'paymentMethod', 'items', 'itemCount', 'subtotal', 'deliveryFee', 'totalAmount', 'status', 'createdAt', 'updatedAt', 'estimatedTimeMinutes']) &&
         data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
         data.customerPhone is string && data.customerPhone.size() >= 11 && data.customerPhone.size() <= 16 &&
         data.customerPhone.matches('^(?:\\+8801|01)[3-9][0-9]{8}$') &&
@@ -62,6 +66,7 @@ service cloud.firestore {
         data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 500000 &&
         (!('deliveryFee' in data) || (data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 1000)) &&
         data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 500000 &&
+        (!('estimatedTimeMinutes' in data) || (data.estimatedTimeMinutes is number && data.estimatedTimeMinutes >= 0 && data.estimatedTimeMinutes <= 300)) &&
         data.status == 'pending' &&
         data.createdAt == request.time;
     }

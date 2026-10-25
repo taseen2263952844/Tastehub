@@ -142,25 +142,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('tastehub_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Real Firebase listeners when configured
+  // 1. Fetch public menu catalog when Firebase is configured
   useEffect(() => {
     if (!firebaseStatus.isConfigured) return;
 
-    // Load menu from Firestore
-    fetchMenuItemsFromFirestore().then((items) => {
-      if (items && items.length > 0) {
-        setMenuItems(items);
-      }
-    });
+    fetchMenuItemsFromFirestore()
+      .then((items) => {
+        if (items && items.length > 0) {
+          setMenuItems(items);
+        }
+      })
+      .catch((err) => {
+        console.warn('Falling back to local menu catalog:', err);
+      });
+  }, []);
 
-    // Realtime orders listener
-    const unsubscribeOrders = subscribeToOrdersFirestore((liveOrders) => {
-      if (liveOrders && liveOrders.length > 0) {
-        setOrders(liveOrders);
-      }
-    });
+  // 2. Realtime Auth State Listener
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured) return;
 
-    // Realtime auth listener
     const unsubscribeAuth = subscribeToAuthState((user) => {
       if (user) {
         const isAuth = user.email?.toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
@@ -177,10 +177,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return () => {
-      unsubscribeOrders();
       unsubscribeAuth();
     };
   }, []);
+
+  // 3. Realtime Orders Listener: STRICTLY for authorized administrators only!
+  // Visitors are never allowed to list or query other customers' orders.
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured || !adminUser?.isAuthorized) {
+      return;
+    }
+
+    const unsubscribeOrders = subscribeToOrdersFirestore(
+      (liveOrders) => {
+        if (liveOrders && liveOrders.length > 0) {
+          setOrders(liveOrders);
+        }
+      },
+      (error) => {
+        console.warn('Order subscription error:', error);
+      }
+    );
+
+    return () => {
+      unsubscribeOrders();
+    };
+  }, [adminUser?.isAuthorized]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -288,16 +310,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       estimatedTimeMinutes: payload.orderType === 'delivery' ? 40 : 25
     };
 
-    // If Firebase is configured, persist to Cloud Firestore
+    // If Firebase is configured, strictly persist to Cloud Firestore
     if (firebaseStatus.isConfigured) {
       try {
         await createOrderInFirestore(newOrder);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to save order to Firestore:', err);
+        // Throw an explicit informative error so checkout UI displays it and does NOT falsely claim success
+        let message = 'Failed to record order to Cloud Firestore.';
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error) message = `Firestore: ${parsed.error}`;
+        } catch {
+          if (err.message) message = err.message;
+        }
+        throw new Error(message);
       }
     }
 
-    // Update local state
+    // Only update local state and clear cart when the order has genuinely been saved
     setOrders((prev) => [newOrder, ...prev]);
     setLastOrder(newOrder);
     setTrackedOrder(newOrder);
