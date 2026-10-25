@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Check if the user is an authorized administrator
+    // 1. Email matched with verified status (bdtaseengaming@gmail.com)
+    // 2. Or explicit entry in /admins/{uid} collection
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == "bdtaseengaming@gmail.com" && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation for MenuItem documents
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'category', 'price', 'description', 'isAvailable']) &&
+        data.keys().hasOnly(['id', 'name', 'category', 'price', 'description', 'imageUrl', 'isAvailable', 'spiceLevel', 'prepTimeMinutes', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.category is string && (data.category in ['biryani-rice', 'curries', 'kebabs-bites', 'appetizers', 'desserts-drinks']) &&
+        data.price is number && data.price >= 0 && data.price <= 50000 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.isAvailable is bool &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+        (!('spiceLevel' in data) || (data.spiceLevel in ['Mild', 'Medium', 'Spicy', 'Extra Spicy'])) &&
+        (!('prepTimeMinutes' in data) || (data.prepTimeMinutes is number && data.prepTimeMinutes >= 0 && data.prepTimeMinutes <= 300));
+    }
+
+    // Validation for incoming customer orders
+    function isValidOrder(data) {
+      return data.keys().hasAll(['customerName', 'customerPhone', 'orderType', 'paymentMethod', 'items', 'subtotal', 'totalAmount', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'customerName', 'customerPhone', 'orderType', 'deliveryAddress', 'orderNotes', 'paymentMethod', 'items', 'itemCount', 'subtotal', 'deliveryFee', 'totalAmount', 'status', 'createdAt', 'updatedAt']) &&
+        data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
+        data.customerPhone is string && data.customerPhone.size() >= 11 && data.customerPhone.size() <= 16 &&
+        data.customerPhone.matches('^(?:\\+8801|01)[3-9][0-9]{8}$') &&
+        data.orderType in ['delivery', 'pickup'] &&
+        (data.orderType != 'delivery' || (('deliveryAddress' in data) && data.deliveryAddress is string && data.deliveryAddress.size() >= 5 && data.deliveryAddress.size() <= 300)) &&
+        (!('orderNotes' in data) || (data.orderNotes is string && data.orderNotes.size() <= 300)) &&
+        data.paymentMethod in ['cash_on_delivery', 'pay_at_pickup'] &&
+        data.items is string && data.items.size() <= 10000 &&
+        data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 500000 &&
+        (!('deliveryFee' in data) || (data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 1000)) &&
+        data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 500000 &&
+        data.status == 'pending' &&
+        data.createdAt == request.time;
+    }
+
+    // --- MENU ITEMS COLLECTION ---
+    match /menu_items/{menuItemId} {
+      // Anyone can view the active restaurant menu
+      allow read: if true;
+      // Only authorized administrators can add, edit, or delete menu dishes
+      allow create: if isAdmin() && isValidId(menuItemId) && isValidMenuItem(incoming());
+      allow update: if isAdmin() && isValidMenuItem(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- ORDERS COLLECTION ---
+    match /orders/{orderId} {
+      // Customers can create their order with strict validation
+      allow create: if isValidId(orderId) && isValidOrder(incoming());
+      
+      // Strict privacy: Customers/visitors cannot browse or list orders.
+      // Only authorized restaurant administrators can read and list orders.
+      allow read: if isAdmin();
+
+      // Only administrators can update an order's fulfillment status (e.g. pending -> confirmed -> preparing -> out_for_delivery -> completed)
+      // Customers cannot alter order status or prices after submission.
+      allow update: if isAdmin() && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'adminNotes']) &&
+        incoming().status in ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'ready_for_pickup', 'completed', 'cancelled'] &&
+        incoming().updatedAt == request.time
+      );
+
+      // Only administrators can remove records if necessary
+      allow delete: if isAdmin();
+    }
+
+    // --- ADMINS COLLECTION ---
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && request.auth.uid == adminId;
+      allow write: if false; // Provisioned via Firebase Console or Cloud Functions
+    }
+  }
+}

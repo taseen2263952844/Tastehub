@@ -1,0 +1,6 @@
+{
+  "name": "TasteHub Restaurant",
+  "description": "TasteHub Restaurant - Authentic Bangladeshi cuisine & dining, easy online ordering, takeaway & delivery with real-time order tracking and admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

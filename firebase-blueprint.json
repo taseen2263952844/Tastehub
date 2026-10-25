@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "A food or beverage item offered on the TasteHub Restaurant menu.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the menu item",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the dish in English / Bengali transliteration",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "category": {
+          "type": "string",
+          "description": "Menu category",
+          "enum": ["biryani-rice", "curries", "kebabs-bites", "appetizers", "desserts-drinks"]
+        },
+        "price": {
+          "type": "number",
+          "description": "Price of the dish in Bangladeshi Taka (BDT)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed mouthwatering description of ingredients and spices",
+          "maxLength": 500
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Direct image URL for the dish",
+          "maxLength": 500
+        },
+        "isAvailable": {
+          "type": "boolean",
+          "description": "Whether the dish is currently in stock and orderable"
+        },
+        "spiceLevel": {
+          "type": "string",
+          "description": "Spiciness rating",
+          "enum": ["Mild", "Medium", "Spicy", "Extra Spicy"]
+        },
+        "prepTimeMinutes": {
+          "type": "number",
+          "description": "Estimated preparation time in minutes"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of creation"
+        }
+      },
+      "required": ["name", "category", "price", "description", "isAvailable"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A customer food order placed with TasteHub Restaurant.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Public human-readable order number (e.g. TH-89421)",
+          "maxLength": 32
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Full name of the customer placing the order",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "Bangladeshi contact phone number (e.g. 017XXXXXXXX)",
+          "minLength": 11,
+          "maxLength": 16,
+          "pattern": "^(?:\\+8801|01)[3-9]\\d{8}$"
+        },
+        "orderType": {
+          "type": "string",
+          "description": "Fulfillment method: Delivery or Pickup",
+          "enum": ["delivery", "pickup"]
+        },
+        "deliveryAddress": {
+          "type": "string",
+          "description": "Delivery street address and landmarks if orderType is delivery",
+          "maxLength": 300
+        },
+        "orderNotes": {
+          "type": "string",
+          "description": "Special cooking or delivery instructions",
+          "maxLength": 300
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Strict payment mode: Cash on Delivery or Pay at Pickup",
+          "enum": ["cash_on_delivery", "pay_at_pickup"]
+        },
+        "items": {
+          "type": "string",
+          "description": "Serialized JSON list of ordered items with id, name, price, and quantity"
+        },
+        "itemCount": {
+          "type": "number",
+          "description": "Total number of items in order"
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Subtotal in BDT before delivery charges"
+        },
+        "deliveryFee": {
+          "type": "number",
+          "description": "Delivery charge in BDT (0 for pickup)"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total amount in BDT"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current lifecycle status of the order",
+          "enum": ["pending", "confirmed", "preparing", "out_for_delivery", "ready_for_pickup", "completed", "cancelled"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last status update timestamp"
+        }
+      },
+      "required": ["customerName", "customerPhone", "orderType", "paymentMethod", "items", "subtotal", "totalAmount", "status"]
+    }
+  },
+  "firestore": {
+    "/menu_items/{menuItemId}": {
+      "schema": {
+        "$ref": "#/entities/MenuItem"
+      },
+      "description": "Public catalog of restaurant dishes, managed by authorized administrators."
+    },
+    "/orders/{orderId}": {
+      "schema": {
+        "$ref": "#/entities/Order"
+      },
+      "description": "Restaurant food orders placed by customers, viewable and updatable strictly by authorized restaurant managers."
+    }
+  }
+}
