@@ -58,8 +58,19 @@ export interface OrderItemSummary {
   specialInstructions?: string;
 }
 
+export interface UserProfile {
+  uid: string;
+  displayName: string;
+  email: string;
+  phone?: string;
+  deliveryAddress?: string;
+  savedCart?: string;
+  updatedAt?: string;
+}
+
 export interface Order {
   id: string;
+  userId?: string;
   customerName: string;
   customerPhone: string;
   orderType: OrderType;

@@ -56,6 +56,49 @@
       },
       "required": ["name", "category", "price", "description", "isAvailable"]
     },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "A customer profile containing saved contact details and persistent cart.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of customer",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Customer full name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Customer email",
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "description": "Saved default contact phone number",
+          "maxLength": 20
+        },
+        "deliveryAddress": {
+          "type": "string",
+          "description": "Saved default home/office delivery address",
+          "maxLength": 300
+        },
+        "savedCart": {
+          "type": "string",
+          "description": "JSON serialized persistent cart items",
+          "maxLength": 10000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of profile update"
+        }
+      },
+      "required": ["uid", "email"]
+    },
     "Order": {
       "title": "Order",
       "description": "A customer food order placed with TasteHub Restaurant.",
@@ -65,6 +108,11 @@
           "type": "string",
           "description": "Public human-readable order number (e.g. TH-89421)",
           "maxLength": 32
+        },
+        "userId": {
+          "type": "string",
+          "description": "Optional authenticated customer UID for customer order tracking",
+          "maxLength": 128
         },
         "customerName": {
           "type": "string",
@@ -145,11 +193,17 @@
       },
       "description": "Public catalog of restaurant dishes, managed by authorized administrators."
     },
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Private customer profile with saved address, phone, and persistent cart. Accessible only by the owner."
+    },
     "/orders/{orderId}": {
       "schema": {
         "$ref": "#/entities/Order"
       },
-      "description": "Restaurant food orders placed by customers, viewable and updatable strictly by authorized restaurant managers."
+      "description": "Restaurant food orders placed by customers, viewable by restaurant managers and the customer who placed them."
     }
   }
 }

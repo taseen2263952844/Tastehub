@@ -3,12 +3,14 @@ import {
   getFirestore, 
   collection, 
   getDocs, 
+  getDoc,
   doc, 
   setDoc, 
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
   query, 
+  where,
   orderBy, 
   Firestore,
   serverTimestamp,
@@ -23,7 +25,7 @@ import {
   User,
   Auth
 } from 'firebase/auth';
-import { MenuItem, Order, OrderStatus, FirebaseConnectionStatus } from '../types';
+import { MenuItem, Order, OrderStatus, FirebaseConnectionStatus, UserProfile, CartItem } from '../types';
 import rawConfig from '../../firebase-applet-config.json';
 
 export enum OperationType {
@@ -206,6 +208,9 @@ export async function createOrderInFirestore(order: Order): Promise<void> {
       updatedAt: serverTimestamp()
     };
 
+    if (order.userId) {
+      sanitizedOrder.userId = order.userId;
+    }
     if (order.deliveryAddress) {
       sanitizedOrder.deliveryAddress = order.deliveryAddress;
     }
@@ -238,6 +243,7 @@ export async function updateOrderStatusInFirestore(orderId: string, status: Orde
   }
 }
 
+// Subscribe to all orders (Admin only)
 export function subscribeToOrdersFirestore(
   onOrders: (orders: Order[]) => void,
   onError?: (err: Error) => void
@@ -282,21 +288,137 @@ export function subscribeToOrdersFirestore(
   return unsubscribe;
 }
 
+// Subscribe to a specific customer's private orders
+export function subscribeToCustomerOrdersFirestore(
+  userId: string,
+  onOrders: (orders: Order[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db || !userId) {
+    return () => {};
+  }
+  const collectionPath = 'orders';
+  // Query strictly where userId == userId to comply with security rules
+  const q = query(
+    collection(db, collectionPath), 
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  
+  const unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      const orders: Order[] = [];
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data();
+        let parsedItems = [];
+        try {
+          parsedItems = typeof data.items === 'string' ? JSON.parse(data.items) : data.items;
+        } catch {
+          parsedItems = [];
+        }
+        orders.push({
+          ...data,
+          id: docSnapshot.id,
+          items: parsedItems,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt,
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt,
+        } as Order);
+      });
+      onOrders(orders);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, collectionPath);
+      } catch (e) {
+        if (onError && e instanceof Error) onError(e);
+      }
+    }
+  );
+
+  return unsubscribe;
+}
+
+// ---------------- USER PROFILE & SAVED CART OPERATIONS ----------------
+
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  if (!db || !userId) return null;
+  const docPath = `users/${userId}`;
+  try {
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (userDoc.exists()) {
+      return { uid: userDoc.id, ...userDoc.data() } as UserProfile;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, docPath);
+  }
+}
+
+export async function saveUserProfile(
+  profile: Partial<UserProfile> & { uid: string; email: string }
+): Promise<void> {
+  if (!db || !profile.uid) return;
+  const docPath = `users/${profile.uid}`;
+  try {
+    const userRef = doc(db, 'users', profile.uid);
+    const dataToSave: Record<string, any> = {
+      uid: profile.uid,
+      email: profile.email,
+      updatedAt: serverTimestamp()
+    };
+    if (profile.displayName !== undefined) dataToSave.displayName = profile.displayName;
+    if (profile.phone !== undefined) dataToSave.phone = profile.phone;
+    if (profile.deliveryAddress !== undefined) dataToSave.deliveryAddress = profile.deliveryAddress;
+    if (profile.savedCart !== undefined) dataToSave.savedCart = profile.savedCart;
+
+    await setDoc(userRef, dataToSave, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function saveUserCartToFirestore(userId: string, cart: CartItem[]): Promise<void> {
+  if (!db || !userId) return;
+  const docPath = `users/${userId}`;
+  try {
+    const userRef = doc(db, 'users', userId);
+    const simplifiedCart = cart.map(item => ({
+      menuItemId: item.menuItem.id,
+      quantity: item.quantity,
+      specialInstructions: item.specialInstructions || ''
+    }));
+    await setDoc(userRef, {
+      savedCart: JSON.stringify(simplifiedCart),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
 // ---------------- AUTHENTICATION OPERATIONS ----------------
 
-export async function signInAdminWithGoogle(): Promise<User | null> {
+// General Google Sign-In for Customers and Staff
+export async function signInWithGoogle(): Promise<User | null> {
   if (!auth) {
     throw new Error('Firebase Auth is not configured. Please add Firebase configuration.');
   }
   const provider = new GoogleAuthProvider();
+  // Prompt account selection
+  provider.setCustomParameters({ prompt: 'select_account' });
   const userCredential = await signInWithPopup(auth, provider);
   return userCredential.user;
 }
 
-export async function signOutAdmin(): Promise<void> {
+export const signInAdminWithGoogle = signInWithGoogle;
+
+export async function signOutUser(): Promise<void> {
   if (!auth) return;
   await firebaseSignOut(auth);
 }
+
+export const signOutAdmin = signOutUser;
 
 export function subscribeToAuthState(callback: (user: User | null) => void): () => void {
   if (!auth) {

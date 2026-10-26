@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   MenuItem, 
   CartItem, 
@@ -7,7 +7,8 @@ import {
   MenuCategoryId, 
   FirebaseConnectionStatus,
   OrderType,
-  PaymentMethod
+  PaymentMethod,
+  UserProfile
 } from '../types';
 import { INITIAL_MENU_ITEMS, INITIAL_ORDERS } from '../data/sampleMenu';
 import { 
@@ -16,11 +17,15 @@ import {
   updateOrderStatusInFirestore, 
   saveMenuItemToFirestore, 
   deleteMenuItemFromFirestore,
-  signInAdminWithGoogle,
-  signOutAdmin,
+  signInWithGoogle,
+  signOutUser,
   subscribeToAuthState,
   fetchMenuItemsFromFirestore,
-  subscribeToOrdersFirestore
+  subscribeToOrdersFirestore,
+  subscribeToCustomerOrdersFirestore,
+  fetchUserProfile,
+  saveUserProfile,
+  saveUserCartToFirestore
 } from '../services/firebase';
 
 interface CustomerCheckoutPayload {
@@ -35,24 +40,29 @@ interface CustomerCheckoutPayload {
 interface AppContextType {
   menuItems: MenuItem[];
   orders: Order[];
+  customerOrders: Order[];
   cart: CartItem[];
   activeCategory: MenuCategoryId;
   searchQuery: string;
-  activeView: 'menu' | 'admin' | 'tracking';
+  activeView: 'menu' | 'admin' | 'tracking' | 'customer_orders';
   selectedDish: MenuItem | null;
   lastOrder: Order | null;
   trackedOrder: Order | null;
   adminUser: { email: string; name?: string; isAuthorized: boolean } | null;
+  currentUser: { uid: string; email: string; displayName?: string; photoURL?: string } | null;
+  userProfile: UserProfile | null;
   firebaseStatus: FirebaseConnectionStatus;
   isCartOpen: boolean;
+  isProfileModalOpen: boolean;
   toastMessage: string | null;
 
   // Actions
   setActiveCategory: (cat: MenuCategoryId) => void;
   setSearchQuery: (q: string) => void;
-  setActiveView: (view: 'menu' | 'admin' | 'tracking') => void;
+  setActiveView: (view: 'menu' | 'admin' | 'tracking' | 'customer_orders') => void;
   setSelectedDish: (dish: MenuItem | null) => void;
   setIsCartOpen: (open: boolean) => void;
+  setIsProfileModalOpen: (open: boolean) => void;
   showToast: (msg: string) => void;
   
   // Cart Actions
@@ -68,12 +78,19 @@ interface AppContextType {
   trackOrder: (orderId: string) => Order | null;
   updateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>;
 
+  // Customer Profile Actions
+  saveCustomerDetails: (details: { displayName?: string; phone?: string; deliveryAddress?: string }) => Promise<void>;
+
   // Menu Management
   addMenuItem: (dish: Omit<MenuItem, 'id'>) => Promise<void>;
   updateMenuItem: (dish: MenuItem) => Promise<void>;
   toggleDishAvailability: (dishId: string) => Promise<void>;
   deleteMenuItem: (dishId: string) => Promise<void>;
   resetToDefaultMenu: () => void;
+
+  // Customer Auth
+  loginWithGoogleCustomer: () => Promise<boolean>;
+  logoutCustomer: () => Promise<void>;
 
   // Admin Auth
   loginAsAdmin: (passcode?: string) => Promise<boolean>;
@@ -104,6 +121,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return INITIAL_ORDERS;
   });
 
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+
   const [cart, setCart] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem('tastehub_cart');
     if (saved) {
@@ -114,12 +133,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeCategory, setActiveCategory] = useState<MenuCategoryId>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeView, setActiveView] = useState<'menu' | 'admin' | 'tracking'>('menu');
+  const [activeView, setActiveView] = useState<'menu' | 'admin' | 'tracking' | 'customer_orders'>('menu');
   const [selectedDish, setSelectedDish] = useState<MenuItem | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Authenticated customer & admin state
+  const [currentUser, setCurrentUser] = useState<{
+    uid: string;
+    email: string;
+    displayName?: string;
+    photoURL?: string;
+  } | null>(null);
+
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   const [adminUser, setAdminUser] = useState<{ email: string; name?: string; isAuthorized: boolean } | null>(() => {
     const saved = sessionStorage.getItem('tastehub_admin_session');
@@ -129,7 +159,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return null;
   });
 
-  // Sync to local memory storage for persistent demo experience
+  const isInitialCartSync = useRef<boolean>(true);
+
+  // 1. Sync cart to localStorage (ensures guest and refreshed carts survive)
+  useEffect(() => {
+    localStorage.setItem('tastehub_cart', JSON.stringify(cart));
+
+    // Also persist customer's cart to Cloud Firestore if signed in
+    if (!isInitialCartSync.current && currentUser?.uid && firebaseStatus.isConfigured) {
+      saveUserCartToFirestore(currentUser.uid, cart).catch((err) => {
+        console.warn('Failed to sync cart to Firestore:', err);
+      });
+    }
+    isInitialCartSync.current = false;
+  }, [cart, currentUser?.uid]);
+
+  // Sync menu & orders to localStorage for demo offline resilience
   useEffect(() => {
     localStorage.setItem('tastehub_menu', JSON.stringify(menuItems));
   }, [menuItems]);
@@ -138,11 +183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('tastehub_orders', JSON.stringify(orders));
   }, [orders]);
 
-  useEffect(() => {
-    localStorage.setItem('tastehub_cart', JSON.stringify(cart));
-  }, [cart]);
-
-  // 1. Fetch public menu catalog when Firebase is configured
+  // 2. Fetch public menu catalog when Firebase is configured
   useEffect(() => {
     if (!firebaseStatus.isConfigured) return;
 
@@ -157,32 +198,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
   }, []);
 
-  // 2. Realtime Auth State Listener
+  // 3. Realtime Auth State Listener for Customers & Staff
   useEffect(() => {
     if (!firebaseStatus.isConfigured) return;
 
-    const unsubscribeAuth = subscribeToAuthState((user) => {
+    const unsubscribeAuth = subscribeToAuthState(async (user) => {
       if (user) {
         const isAuth = user.email?.toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
-        const adminObj = {
+        
+        const userObj = {
+          uid: user.uid,
           email: user.email || '',
-          name: user.displayName || 'Authorized Admin',
-          isAuthorized: isAuth
+          displayName: user.displayName || user.email?.split('@')[0] || 'Customer',
+          photoURL: user.photoURL || undefined
         };
-        setAdminUser(adminObj);
-        sessionStorage.setItem('tastehub_admin_session', JSON.stringify(adminObj));
-      } else if (!sessionStorage.getItem('tastehub_admin_session')) {
-        setAdminUser(null);
+        setCurrentUser(userObj);
+
+        // Fetch or initialize customer profile from Cloud Firestore
+        try {
+          const profile = await fetchUserProfile(user.uid);
+          if (profile) {
+            setUserProfile(profile);
+            // If the user has a saved cart in Firestore and current local cart is empty, restore it
+            if (profile.savedCart && cart.length === 0) {
+              try {
+                const parsedCartData: { menuItemId: string; quantity: number; specialInstructions?: string }[] = JSON.parse(profile.savedCart);
+                const restoredItems: CartItem[] = [];
+                parsedCartData.forEach((saved) => {
+                  const dish = menuItems.find((d) => d.id === saved.menuItemId);
+                  if (dish) {
+                    restoredItems.push({
+                      menuItem: dish,
+                      quantity: saved.quantity,
+                      specialInstructions: saved.specialInstructions
+                    });
+                  }
+                });
+                if (restoredItems.length > 0) {
+                  setCart(restoredItems);
+                }
+              } catch {
+                /* ignore corrupt cart */
+              }
+            }
+          } else {
+            // Create initial profile record in Firestore
+            const initialProfile: UserProfile = {
+              uid: user.uid,
+              displayName: userObj.displayName,
+              email: userObj.email,
+              phone: '',
+              deliveryAddress: ''
+            };
+            await saveUserProfile(initialProfile);
+            setUserProfile(initialProfile);
+          }
+        } catch (err) {
+          console.warn('Could not load user profile from Firestore:', err);
+        }
+
+        if (isAuth) {
+          const adminObj = {
+            email: user.email || '',
+            name: user.displayName || 'Authorized Admin',
+            isAuthorized: true
+          };
+          setAdminUser(adminObj);
+          sessionStorage.setItem('tastehub_admin_session', JSON.stringify(adminObj));
+        }
+      } else {
+        setCurrentUser(null);
+        setUserProfile(null);
+        setCustomerOrders([]);
+        if (!sessionStorage.getItem('tastehub_admin_session')) {
+          setAdminUser(null);
+        }
       }
     });
 
     return () => {
       unsubscribeAuth();
     };
-  }, []);
+  }, [menuItems]);
 
-  // 3. Realtime Orders Listener: STRICTLY for authorized administrators only!
-  // Visitors are never allowed to list or query other customers' orders.
+  // 4. Realtime Customer Orders Listener (Strictly where userId == currentUser.uid)
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured || !currentUser?.uid) {
+      setCustomerOrders([]);
+      return;
+    }
+
+    const unsubscribeCustomerOrders = subscribeToCustomerOrdersFirestore(
+      currentUser.uid,
+      (ordersList) => {
+        setCustomerOrders(ordersList);
+      },
+      (error) => {
+        console.warn('Customer orders subscription notice:', error);
+      }
+    );
+
+    return () => {
+      unsubscribeCustomerOrders();
+    };
+  }, [currentUser?.uid]);
+
+  // 5. Realtime Orders Listener: STRICTLY for authorized administrators only!
   useEffect(() => {
     if (!firebaseStatus.isConfigured || !adminUser?.isAuthorized) {
       return;
@@ -254,6 +375,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearCart = () => {
     setCart([]);
+    if (currentUser?.uid && firebaseStatus.isConfigured) {
+      saveUserCartToFirestore(currentUser.uid, []).catch(() => {});
+    }
   };
 
   const cartSubtotal = cart.reduce(
@@ -262,6 +386,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Save Customer Profile & Address to Firestore
+  const saveCustomerDetails = async (details: { displayName?: string; phone?: string; deliveryAddress?: string }) => {
+    if (!currentUser?.uid) return;
+
+    const updatedProfile: UserProfile = {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      displayName: details.displayName || userProfile?.displayName || currentUser.displayName || '',
+      phone: details.phone !== undefined ? details.phone : userProfile?.phone,
+      deliveryAddress: details.deliveryAddress !== undefined ? details.deliveryAddress : userProfile?.deliveryAddress
+    };
+
+    if (firebaseStatus.isConfigured) {
+      await saveUserProfile(updatedProfile);
+    }
+    setUserProfile(updatedProfile);
+    showToast('Your customer profile & address have been saved.');
+  };
 
   // Authoritative Order Placement
   const placeOrder = async (payload: CustomerCheckoutPayload): Promise<Order> => {
@@ -293,6 +436,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newOrder: Order = {
       id: orderId,
+      userId: currentUser?.uid || undefined, // Attach authenticated customer UID if signed in
       customerName: payload.customerName.trim(),
       customerPhone: payload.customerPhone.trim(),
       orderType: payload.orderType,
@@ -314,9 +458,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (firebaseStatus.isConfigured) {
       try {
         await createOrderInFirestore(newOrder);
+
+        // Also update the customer's saved profile with contact details for future checkouts
+        if (currentUser?.uid) {
+          saveUserProfile({
+            uid: currentUser.uid,
+            email: currentUser.email,
+            displayName: payload.customerName.trim(),
+            phone: payload.customerPhone.trim(),
+            deliveryAddress: payload.deliveryAddress?.trim() || userProfile?.deliveryAddress
+          }).catch(() => {});
+        }
       } catch (err: any) {
         console.error('Failed to save order to Firestore:', err);
-        // Throw an explicit informative error so checkout UI displays it and does NOT falsely claim success
         let message = 'Failed to record order to Cloud Firestore.';
         try {
           const parsed = JSON.parse(err.message);
@@ -330,6 +484,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Only update local state and clear cart when the order has genuinely been saved
     setOrders((prev) => [newOrder, ...prev]);
+    if (currentUser?.uid) {
+      setCustomerOrders((prev) => [newOrder, ...prev]);
+    }
     setLastOrder(newOrder);
     setTrackedOrder(newOrder);
     clearCart();
@@ -342,6 +499,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cleanId = orderId.trim().toUpperCase();
     const cleanPhone = orderId.trim();
     const found = orders.find(
+      (o) => o.id.toUpperCase() === cleanId || o.customerPhone === cleanPhone
+    ) || customerOrders.find(
       (o) => o.id.toUpperCase() === cleanId || o.customerPhone === cleanPhone
     );
     if (found) {
@@ -366,6 +525,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? { ...o, status: newStatus, updatedAt: new Date().toISOString() }
+          : o
+      )
+    );
+
+    setCustomerOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
           ? { ...o, status: newStatus, updatedAt: new Date().toISOString() }
@@ -445,6 +612,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Menu reset to authentic Bangladeshi sample items');
   };
 
+  // Customer Auth
+  const loginWithGoogleCustomer = async (): Promise<boolean> => {
+    try {
+      const user = await signInWithGoogle();
+      if (!user) return false;
+      showToast(`Welcome back, ${user.displayName || user.email}!`);
+      return true;
+    } catch (err) {
+      console.error('Customer Google sign-in failed:', err);
+      showToast('Sign-in failed. Please check Firebase Authentication settings.');
+      return false;
+    }
+  };
+
+  const logoutCustomer = async (): Promise<void> => {
+    try {
+      await signOutUser();
+      setCurrentUser(null);
+      setUserProfile(null);
+      setCustomerOrders([]);
+      showToast('You have signed out successfully.');
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+  };
+
   // Admin Auth Handlers
   const loginAsAdmin = async (passcode?: string): Promise<boolean> => {
     if (passcode === ADMIN_DEMO_PIN) {
@@ -464,7 +657,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginWithGoogleAdmin = async (): Promise<boolean> => {
     try {
-      const user = await signInAdminWithGoogle();
+      const user = await signInWithGoogle();
       if (!user) return false;
 
       const isAuth = user.email?.toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
@@ -490,7 +683,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logoutAdmin = () => {
-    signOutAdmin().catch(() => {});
+    signOutUser().catch(() => {});
     setAdminUser(null);
     sessionStorage.removeItem('tastehub_admin_session');
     showToast('Logged out from Admin Dashboard');
@@ -501,6 +694,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         menuItems,
         orders,
+        customerOrders,
         cart,
         activeCategory,
         searchQuery,
@@ -509,8 +703,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastOrder,
         trackedOrder,
         adminUser,
+        currentUser,
+        userProfile,
         firebaseStatus,
         isCartOpen,
+        isProfileModalOpen,
         toastMessage,
 
         setActiveCategory,
@@ -518,6 +715,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveView,
         setSelectedDish,
         setIsCartOpen,
+        setIsProfileModalOpen,
         showToast,
 
         addToCart,
@@ -530,6 +728,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         placeOrder,
         trackOrder,
         updateOrderStatus,
+        saveCustomerDetails,
 
         addMenuItem,
         updateMenuItem,
@@ -537,6 +736,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteMenuItem,
         resetToDefaultMenu,
 
+        loginWithGoogleCustomer,
+        logoutCustomer,
         loginAsAdmin,
         loginWithGoogleAdmin,
         logoutAdmin

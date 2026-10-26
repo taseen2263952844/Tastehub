@@ -9,6 +9,8 @@ import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { OrderTrackerView } from './components/OrderTrackerView';
+import { CustomerOrdersView } from './components/CustomerOrdersView';
+import { CustomerProfileModal } from './components/CustomerProfileModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { DeploymentGuideModal } from './components/DeploymentGuideModal';
 import { Footer } from './components/Footer';
@@ -134,6 +136,10 @@ const MainContent: React.FC = () => {
         {activeView === 'tracking' && (
           <OrderTrackerView />
         )}
+
+        {activeView === 'customer_orders' && (
+          <CustomerOrdersView />
+        )}
       </main>
 
       {/* Global Footer */}
@@ -141,6 +147,8 @@ const MainContent: React.FC = () => {
 
       {/* Modals & Overlays */}
       <DishDetailModal />
+
+      <CustomerProfileModal />
 
       <CartDrawer 
         onOpenCheckout={() => setIsCheckoutOpen(true)} 

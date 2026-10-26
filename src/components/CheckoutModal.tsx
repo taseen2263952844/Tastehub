@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Bike, 
@@ -27,7 +27,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose, 
   onOrderSuccess 
 }) => {
-  const { cart, cartSubtotal, placeOrder, showToast } = useApp();
+  const { cart, cartSubtotal, placeOrder, showToast, currentUser, userProfile } = useApp();
 
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [customerName, setCustomerName] = useState<string>('');
@@ -39,6 +39,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Pre-fill saved customer details from Cloud Firestore when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      if (userProfile?.displayName || currentUser?.displayName) {
+        setCustomerName(userProfile?.displayName || currentUser?.displayName || '');
+      }
+      if (userProfile?.phone) {
+        setCustomerPhone(userProfile.phone);
+      }
+      if (userProfile?.deliveryAddress) {
+        setDeliveryAddress(userProfile.deliveryAddress);
+      }
+    }
+  }, [isOpen, currentUser, userProfile]);
 
   if (!isOpen) return null;
 
