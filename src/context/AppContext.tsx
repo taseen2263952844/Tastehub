@@ -1,507 +1,1376 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { 
-  MenuItem, 
-  CartItem, 
-  Order, 
-  OrderStatus, 
-  MenuCategoryId, 
-  FirebaseConnectionStatus,
-  OrderType,
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
+import {
+  Product,
+  Category,
+  Banner,
+  StoreSettings,
+  CartItem,
+  Order,
+  OrderStatus,
   PaymentMethod,
-  UserProfile
+  PaymentStatus,
+  CategorySlug,
+  SortOption,
+  StoreView,
+  UserProfile,
+  SavedAddress,
+  FirebaseConnectionStatus,
+  WebsiteSection,
+  WebsiteSnapshot,
+  NavigationMenu,
+  CmsPage,
+  CmsPost,
+  Promotion,
+  MediaAsset,
+  NewsletterSubscriber,
 } from '../types';
-import { INITIAL_MENU_ITEMS, INITIAL_ORDERS } from '../data/sampleMenu';
-import { 
-  firebaseStatus, 
-  createOrderInFirestore, 
-  updateOrderStatusInFirestore, 
-  saveMenuItemToFirestore, 
-  deleteMenuItemFromFirestore,
-  signInWithGoogle,
-  signOutUser,
-  subscribeToAuthState,
-  fetchMenuItemsFromFirestore,
+import {
+  INITIAL_PRODUCTS,
+  INITIAL_CATEGORIES,
+  INITIAL_BANNERS,
+  DEFAULT_STORE_SETTINGS,
+  INITIAL_WEBSITE_SECTIONS,
+  INITIAL_NAVIGATION_MENUS,
+  INITIAL_CMS_PAGES,
+  INITIAL_CMS_POSTS,
+  INITIAL_PROMOTIONS,
+  INITIAL_MEDIA_ASSETS,
+} from '../data/catalogSeed';
+import {
+  firebaseStatus,
+  subscribeToProductsFirestore,
+  saveProductToFirestore,
+  deleteProductFromFirestore,
+  subscribeToCategoriesFirestore,
+  saveCategoryToFirestore,
+  deleteCategoryFromFirestore,
+  subscribeToBannersFirestore,
+  saveBannerToFirestore,
+  deleteBannerFromFirestore,
+  subscribeToStoreSettingsFirestore,
+  saveStoreSettingsToFirestore,
+  subscribeToWebsiteSectionsFirestore,
+  saveWebsiteSectionToFirestore,
+  deleteWebsiteSectionFromFirestore,
+  subscribeToPublishedSnapshotFirestore,
+  subscribeToAdminWebsiteVersionsFirestore,
+  saveWebsiteSnapshotToFirestore,
+  subscribeToNavigationMenusFirestore,
+  saveNavigationMenuToFirestore,
+  deleteNavigationMenuFromFirestore,
+  subscribeToCmsPagesFirestore,
+  saveCmsPageToFirestore,
+  deleteCmsPageFromFirestore,
+  subscribeToCmsPostsFirestore,
+  saveCmsPostToFirestore,
+  deleteCmsPostFromFirestore,
+  subscribeToPromotionsFirestore,
+  savePromotionToFirestore,
+  deletePromotionFromFirestore,
+  subscribeToMediaLibraryFirestore,
+  saveMediaAssetToFirestore,
+  deleteMediaAssetFromFirestore,
+  subscribeNewsletterInFirestore,
+  subscribeToNewsletterSubscribersFirestore,
+  deleteNewsletterSubscriberFromFirestore,
+  subscribeToAllUsersAdminFirestore,
+  createOrderInFirestore,
+  updateOrderInFirestore,
   subscribeToOrdersFirestore,
   subscribeToCustomerOrdersFirestore,
   fetchUserProfile,
   saveUserProfile,
-  saveUserCartToFirestore
+  fetchUserCartFromFirestore,
+  saveUserCartToFirestore,
+  checkIsAdminInFirestore,
+  signInWithGoogle,
+  signInWithEmail,
+  registerWithEmail,
+  signOutUser,
+  subscribeToAuthState,
 } from '../services/firebase';
 
-interface CustomerCheckoutPayload {
+export const AUTHORIZED_ADMIN_EMAIL = 'bdtaseengaming@gmail.com';
+const LOCAL_CART_KEY = 'veyra_cart_v1';
+
+export function formatBDT(amount: number): string {
+  return `৳${Math.round(amount).toLocaleString('en-US')}`;
+}
+
+export function normalizeBDPhone(raw: string): string {
+  return raw.replace(/[\s\-()]/g, '').trim();
+}
+
+export function isValidBDPhone(raw: string): boolean {
+  const normalized = normalizeBDPhone(raw);
+  return /^(?:\+8801|01)[3-9][0-9]{8}$/.test(normalized);
+}
+
+export interface CheckoutPayload {
   customerName: string;
   customerPhone: string;
-  orderType: OrderType;
-  deliveryAddress?: string;
-  orderNotes?: string;
+  customerEmail?: string;
+  city: string;
+  area: string;
+  deliveryAddress: string;
+  deliveryInstructions?: string;
   paymentMethod: PaymentMethod;
+  paymentReference?: string;
+  promoCode?: string;
+  saveAddressToProfile?: boolean;
+}
+
+export interface AuthUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  emailVerified: boolean;
+}
+
+export interface PromoValidationResult {
+  valid: boolean;
+  promo?: Promotion;
+  discountAmount: number;
+  freeDelivery: boolean;
+  message: string;
 }
 
 interface AppContextType {
-  menuItems: MenuItem[];
-  orders: Order[];
-  customerOrders: Order[];
-  cart: CartItem[];
-  activeCategory: MenuCategoryId;
-  searchQuery: string;
-  activeView: 'menu' | 'admin' | 'tracking' | 'customer_orders';
-  selectedDish: MenuItem | null;
-  lastOrder: Order | null;
-  trackedOrder: Order | null;
-  adminUser: { email: string; name?: string; isAuthorized: boolean } | null;
-  currentUser: { uid: string; email: string; displayName?: string; photoURL?: string } | null;
-  userProfile: UserProfile | null;
-  firebaseStatus: FirebaseConnectionStatus;
-  isCartOpen: boolean;
-  isProfileModalOpen: boolean;
-  toastMessage: string | null;
+  // Storefront data (published vs preview-draft resolved automatically)
+  products: Product[];
+  categories: Category[];
+  banners: Banner[];
+  storeSettings: StoreSettings;
+  websiteSections: WebsiteSection[];
+  navigationMenus: NavigationMenu[];
+  cmsPages: CmsPage[];
+  cmsPosts: CmsPost[];
+  promotions: Promotion[];
+  isFirestoreCatalogActive: boolean;
 
-  // Actions
-  setActiveCategory: (cat: MenuCategoryId) => void;
+  // Draft & Publish CMS workspace (Admin)
+  draftSettings: StoreSettings;
+  draftSections: WebsiteSection[];
+  draftMenus: NavigationMenu[];
+  publishedSnapshot: WebsiteSnapshot | null;
+  websiteVersions: WebsiteSnapshot[];
+  isPreviewMode: boolean;
+  setIsPreviewMode: (preview: boolean) => void;
+  hasUnpublishedChanges: boolean;
+  updateDraftSettings: (next: StoreSettings) => Promise<void>;
+  updateDraftSections: (next: WebsiteSection[]) => Promise<void>;
+  updateDraftMenus: (next: NavigationMenu[]) => Promise<void>;
+  publishWebsiteChanges: (label?: string) => Promise<void>;
+  discardDraftChanges: () => Promise<void>;
+  restoreVersionToDraft: (snapshot: WebsiteSnapshot) => Promise<void>;
+
+  // Admin-only collections
+  mediaAssets: MediaAsset[];
+  newsletterSubscribers: NewsletterSubscriber[];
+  adminCustomers: UserProfile[];
+
+  // Navigation & catalog filters
+  activeView: StoreView;
+  setActiveView: (view: StoreView) => void;
+  selectedProduct: Product | null;
+  openProductDetail: (product: Product) => void;
+  selectedPage: CmsPage | null;
+  openPageBySlug: (slug: string) => void;
+  selectedPost: CmsPost | null;
+  openPostBySlug: (slug: string) => void;
+  navigateTarget: (targetType: string, targetValue: string) => void;
+  activeCategory: CategorySlug;
+  setActiveCategory: (cat: CategorySlug) => void;
+  searchQuery: string;
   setSearchQuery: (q: string) => void;
-  setActiveView: (view: 'menu' | 'admin' | 'tracking' | 'customer_orders') => void;
-  setSelectedDish: (dish: MenuItem | null) => void;
+  sortBy: SortOption;
+  setSortBy: (sort: SortOption) => void;
+  navigateToShop: (category?: CategorySlug, query?: string) => void;
+
+  // Cart & Promo
+  cart: CartItem[];
+  isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
-  setIsProfileModalOpen: (open: boolean) => void;
-  showToast: (msg: string) => void;
-  
-  // Cart Actions
-  addToCart: (dish: MenuItem, quantity?: number, instructions?: string) => void;
-  updateCartQuantity: (dishId: string, quantity: number) => void;
-  removeFromCart: (dishId: string) => void;
+  addToCart: (product: Product, quantity?: number, variationId?: string) => boolean;
+  updateCartQuantity: (productId: string, variationId: string | undefined, quantity: number) => void;
+  removeFromCart: (productId: string, variationId?: string) => void;
   clearCart: () => void;
   cartSubtotal: number;
   cartItemCount: number;
+  calculateDeliveryFee: (city: string, subtotal: number, promoCode?: string) => number;
+  validatePromoCode: (code: string, subtotal: number) => PromoValidationResult;
 
-  // Order Actions
-  placeOrder: (payload: CustomerCheckoutPayload) => Promise<Order>;
-  trackOrder: (orderId: string) => Order | null;
-  updateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>;
+  // Auth & Customer Profile
+  currentUser: AuthUser | null;
+  authLoading: boolean;
+  isAdmin: boolean;
+  userProfile: UserProfile | null;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+  loginWithGoogle: () => Promise<boolean>;
+  loginWithEmailPassword: (email: string, password: string) => Promise<boolean>;
+  signupWithEmailPassword: (name: string, email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  updateProfileInfo: (data: { displayName: string; phone: string }) => Promise<void>;
+  saveAddress: (address: Omit<SavedAddress, 'id'> & { id?: string }) => Promise<void>;
+  deleteAddress: (addressId: string) => Promise<void>;
 
-  // Customer Profile Actions
-  saveCustomerDetails: (details: { displayName?: string; phone?: string; deliveryAddress?: string }) => Promise<void>;
+  // Orders & Tracking
+  orders: Order[];
+  customerOrders: Order[];
+  lastOrder: Order | null;
+  trackedOrder: Order | null;
+  placeOrder: (payload: CheckoutPayload) => Promise<Order>;
+  lookupOrder: (orderNumberOrId: string) => Order | null;
+  updateOrder: (
+    orderId: string,
+    updates: { status?: OrderStatus; paymentStatus?: PaymentStatus; adminNotes?: string }
+  ) => Promise<void>;
 
-  // Menu Management
-  addMenuItem: (dish: Omit<MenuItem, 'id'>) => Promise<void>;
-  updateMenuItem: (dish: MenuItem) => Promise<void>;
-  toggleDishAvailability: (dishId: string) => Promise<void>;
-  deleteMenuItem: (dishId: string) => Promise<void>;
-  resetToDefaultMenu: () => void;
+  // Admin Catalog & CMS Management
+  saveProduct: (product: Product) => Promise<void>;
+  deleteProduct: (productId: string) => Promise<void>;
+  saveCategory: (category: Category) => Promise<void>;
+  deleteCategory: (categoryId: string) => Promise<void>;
+  saveBanner: (banner: Banner) => Promise<void>;
+  deleteBanner: (bannerId: string) => Promise<void>;
+  saveStoreSettings: (settings: StoreSettings) => Promise<void>;
+  saveCmsPage: (page: CmsPage) => Promise<void>;
+  deleteCmsPage: (pageId: string) => Promise<void>;
+  saveCmsPost: (post: CmsPost) => Promise<void>;
+  deleteCmsPost: (postId: string) => Promise<void>;
+  savePromotion: (promo: Promotion) => Promise<void>;
+  deletePromotion: (promoId: string) => Promise<void>;
+  saveMediaAsset: (asset: MediaAsset) => Promise<void>;
+  deleteMediaAsset: (assetId: string, storagePath?: string) => Promise<void>;
+  subscribeNewsletter: (email: string, source?: 'footer' | 'section') => Promise<void>;
+  removeNewsletterSubscriber: (id: string) => Promise<void>;
+  seedCatalogToFirestore: () => Promise<void>;
 
-  // Customer Auth
-  loginWithGoogleCustomer: () => Promise<boolean>;
-  logoutCustomer: () => Promise<void>;
-
-  // Admin Auth
-  loginAsAdmin: (passcode?: string) => Promise<boolean>;
-  loginWithGoogleAdmin: () => Promise<boolean>;
-  logoutAdmin: () => void;
+  // System & UI
+  firebaseStatus: FirebaseConnectionStatus;
+  toastMessage: string | null;
+  showToast: (msg: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Authoritative authorized admin email
-export const AUTHORIZED_ADMIN_EMAIL = 'bdtaseengaming@gmail.com';
-export const ADMIN_DEMO_PIN = '7890'; // Local management passcode when Firebase is unconfigured
-
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
-    const saved = localStorage.getItem('tastehub_menu');
-    if (saved) {
-      try { return JSON.parse(saved); } catch { /* ignore */ }
-    }
-    return INITIAL_MENU_ITEMS;
-  });
+  const [firestoreProducts, setFirestoreProducts] = useState<Product[]>([]);
+  const [firestoreCategories, setFirestoreCategories] = useState<Category[]>([]);
+  const [firestoreBanners, setFirestoreBanners] = useState<Banner[]>([]);
+  const [firestoreSettings, setFirestoreSettings] = useState<StoreSettings | null>(null);
+  const [firestoreSections, setFirestoreSections] = useState<WebsiteSection[]>([]);
+  const [firestoreMenus, setFirestoreMenus] = useState<NavigationMenu[]>([]);
+  const [publishedSnapshot, setPublishedSnapshot] = useState<WebsiteSnapshot | null>(null);
+  const [websiteVersions, setWebsiteVersions] = useState<WebsiteSnapshot[]>([]);
+  const [firestorePages, setFirestorePages] = useState<CmsPage[]>([]);
+  const [firestorePosts, setFirestorePosts] = useState<CmsPost[]>([]);
+  const [firestorePromotions, setFirestorePromotions] = useState<Promotion[]>([]);
+  const [firestoreMedia, setFirestoreMedia] = useState<MediaAsset[]>([]);
+  const [newsletterSubscribers, setNewsletterSubscribers] = useState<NewsletterSubscriber[]>([]);
+  const [adminCustomers, setAdminCustomers] = useState<UserProfile[]>([]);
 
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem('tastehub_orders');
-    if (saved) {
-      try { return JSON.parse(saved); } catch { /* ignore */ }
-    }
-    return INITIAL_ORDERS;
-  });
-
+  const [orders, setOrders] = useState<Order[]>([]);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
 
   const [cart, setCart] = useState<CartItem[]>(() => {
-    const saved = localStorage.getItem('tastehub_cart');
-    if (saved) {
-      try { return JSON.parse(saved); } catch { /* ignore */ }
+    try {
+      const saved = localStorage.getItem(LOCAL_CART_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore invalid local cart
     }
     return [];
   });
 
-  const [activeCategory, setActiveCategory] = useState<MenuCategoryId>('all');
+  const [activeView, setActiveViewState] = useState<StoreView>('home');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedPageSlug, setSelectedPageSlug] = useState<string>('');
+  const [selectedPostSlug, setSelectedPostSlug] = useState<string>('');
+  const [activeCategory, setActiveCategory] = useState<CategorySlug>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeView, setActiveView] = useState<'menu' | 'admin' | 'tracking' | 'customer_orders'>('menu');
-  const [selectedDish, setSelectedDish] = useState<MenuItem | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>('featured');
+  const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isPreviewMode, setIsPreviewMode] = useState<boolean>(false);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
-  const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Authenticated customer & admin state
-  const [currentUser, setCurrentUser] = useState<{
-    uid: string;
-    email: string;
-    displayName?: string;
-    photoURL?: string;
-  } | null>(null);
-
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
-  const [adminUser, setAdminUser] = useState<{ email: string; name?: string; isAuthorized: boolean } | null>(() => {
-    const saved = sessionStorage.getItem('tastehub_admin_session');
-    if (saved) {
-      try { return JSON.parse(saved); } catch { /* ignore */ }
+  // Local draft overrides (synced with websiteVersions/draft)
+  const [localDraftSettings, setLocalDraftSettings] = useState<StoreSettings | null>(null);
+  const [localDraftSections, setLocalDraftSections] = useState<WebsiteSection[] | null>(null);
+  const [localDraftMenus, setLocalDraftMenus] = useState<NavigationMenu[] | null>(null);
+
+  const hydratedCartUidRef = useRef<string | null>(null);
+
+  // Resolved base collections
+  const products = firestoreProducts.length > 0 ? firestoreProducts : INITIAL_PRODUCTS;
+  const categories = firestoreCategories.length > 0 ? firestoreCategories : INITIAL_CATEGORIES;
+  const banners = firestoreBanners.length > 0 ? firestoreBanners : INITIAL_BANNERS;
+  const cmsPages = firestorePages.length > 0 ? firestorePages : INITIAL_CMS_PAGES;
+  const cmsPosts = firestorePosts.length > 0 ? firestorePosts : INITIAL_CMS_POSTS;
+  const promotions = firestorePromotions.length > 0 ? firestorePromotions : INITIAL_PROMOTIONS;
+  const mediaAssets = firestoreMedia.length > 0 ? firestoreMedia : INITIAL_MEDIA_ASSETS;
+  const isFirestoreCatalogActive = firestoreProducts.length > 0;
+
+  // Published configuration (public-facing source of truth)
+  const publishedSettings: StoreSettings = useMemo(
+    () => ({
+      ...DEFAULT_STORE_SETTINGS,
+      ...(firestoreSettings || {}),
+      ...(publishedSnapshot?.settings || {}),
+    }),
+    [firestoreSettings, publishedSnapshot?.settings]
+  );
+
+  const publishedSections: WebsiteSection[] = useMemo(() => {
+    if (publishedSnapshot?.sections && publishedSnapshot.sections.length > 0) {
+      return [...publishedSnapshot.sections].sort((a, b) => a.displayOrder - b.displayOrder);
     }
-    return null;
-  });
+    if (firestoreSections.length > 0) {
+      return [...firestoreSections].sort((a, b) => a.displayOrder - b.displayOrder);
+    }
+    return INITIAL_WEBSITE_SECTIONS;
+  }, [publishedSnapshot?.sections, firestoreSections]);
 
-  const isInitialCartSync = useRef<boolean>(true);
+  const publishedMenus: NavigationMenu[] = useMemo(() => {
+    if (publishedSnapshot?.menus && publishedSnapshot.menus.length > 0) {
+      return publishedSnapshot.menus;
+    }
+    if (firestoreMenus.length > 0) {
+      return firestoreMenus;
+    }
+    return INITIAL_NAVIGATION_MENUS;
+  }, [publishedSnapshot?.menus, firestoreMenus]);
 
-  // 1. Sync cart to localStorage (ensures guest and refreshed carts survive)
+  // Draft configuration (Admin editor workspace)
+  const remoteDraft = websiteVersions.find((v) => v.id === 'draft');
+  const draftSettings: StoreSettings = useMemo(
+    () =>
+      localDraftSettings || {
+        ...publishedSettings,
+        ...(remoteDraft?.settings || {}),
+      },
+    [localDraftSettings, publishedSettings, remoteDraft?.settings]
+  );
+
+  const draftSections: WebsiteSection[] = useMemo(() => {
+    const raw =
+      localDraftSections ||
+      (remoteDraft?.sections && remoteDraft.sections.length > 0
+        ? remoteDraft.sections
+        : publishedSections);
+    return [...raw].sort((a, b) => a.displayOrder - b.displayOrder);
+  }, [localDraftSections, remoteDraft?.sections, publishedSections]);
+
+  const draftMenus: NavigationMenu[] = useMemo(
+    () =>
+      localDraftMenus ||
+      (remoteDraft?.menus && remoteDraft.menus.length > 0
+        ? remoteDraft.menus
+        : publishedMenus),
+    [localDraftMenus, remoteDraft?.menus, publishedMenus]
+  );
+
+  const hasUnpublishedChanges = useMemo(() => {
+    if (!isAdmin) return false;
+    const pubStr = JSON.stringify({
+      s: publishedSettings,
+      sec: publishedSections,
+      m: publishedMenus,
+    });
+    const draftStr = JSON.stringify({
+      s: draftSettings,
+      sec: draftSections,
+      m: draftMenus,
+    });
+    return pubStr !== draftStr;
+  }, [isAdmin, publishedSettings, publishedSections, publishedMenus, draftSettings, draftSections, draftMenus]);
+
+  // Active storefront configuration (Draft in Preview Mode for Admins, otherwise strictly Published)
+  const storeSettings = isAdmin && isPreviewMode ? draftSettings : publishedSettings;
+  const websiteSections = isAdmin && isPreviewMode ? draftSections : publishedSections;
+  const navigationMenus = isAdmin && isPreviewMode ? draftMenus : publishedMenus;
+
+  const selectedPage = useMemo(
+    () => cmsPages.find((p) => p.slug === selectedPageSlug) || null,
+    [cmsPages, selectedPageSlug]
+  );
+
+  const selectedPost = useMemo(
+    () => cmsPosts.find((p) => p.slug === selectedPostSlug) || null,
+    [cmsPosts, selectedPostSlug]
+  );
+
+  // Sync CSS Custom Properties with active storeSettings
   useEffect(() => {
-    localStorage.setItem('tastehub_cart', JSON.stringify(cart));
+    const root = document.documentElement;
+    root.style.setProperty('--veyra-primary', storeSettings.primaryColor || '#1B3B2B');
+    root.style.setProperty('--veyra-secondary', storeSettings.secondaryColor || '#6E8774');
+    root.style.setProperty('--veyra-bg', storeSettings.backgroundColor || '#FAF8F4');
+    root.style.setProperty('--veyra-surface', storeSettings.surfaceColor || '#F3F0E8');
+    root.style.setProperty('--veyra-text', storeSettings.textColor || '#171C19');
 
-    // Also persist customer's cart to Cloud Firestore if signed in
-    if (!isInitialCartSync.current && currentUser?.uid && firebaseStatus.isConfigured) {
+    const headingFont = storeSettings.headingFont || 'Cormorant Garamond';
+    const bodyFont = storeSettings.bodyFont || 'Plus Jakarta Sans';
+    root.style.setProperty('--veyra-font-heading', `'${headingFont}', Georgia, serif`);
+    root.style.setProperty('--veyra-font-body', `'${bodyFont}', system-ui, sans-serif`);
+
+    const radiusVal =
+      storeSettings.borderRadius === 'sharp'
+        ? '0.25rem'
+        : storeSettings.borderRadius === 'rounded'
+        ? '1.25rem'
+        : '0.75rem';
+    root.style.setProperty('--veyra-radius', radiusVal);
+  }, [storeSettings]);
+
+  // Sync dynamic SEO meta tags & favicon
+  useEffect(() => {
+    let title = storeSettings.metaTitle || `${storeSettings.storeName} — ${storeSettings.tagline}`;
+    let desc =
+      storeSettings.metaDescription ||
+      'Modern multi-category lifestyle & essentials storefront thoughtfully curated for Bangladesh and beyond.';
+    let ogImg = storeSettings.ogImageUrl || '';
+
+    if (activeView === 'product' && selectedProduct) {
+      title = selectedProduct.seoTitle || `${selectedProduct.name} — ${storeSettings.storeName}`;
+      desc = selectedProduct.seoDescription || selectedProduct.shortDescription || desc;
+      ogImg = selectedProduct.images?.[0] || ogImg;
+    } else if (activeView === 'page' && selectedPage) {
+      title = selectedPage.seoTitle || `${selectedPage.title} — ${storeSettings.storeName}`;
+      desc = selectedPage.seoDescription || desc;
+      ogImg = selectedPage.featuredImage || ogImg;
+    } else if (activeView === 'post' && selectedPost) {
+      title = selectedPost.seoTitle || `${selectedPost.title} — ${storeSettings.storeName}`;
+      desc = selectedPost.seoDescription || selectedPost.excerpt || desc;
+      ogImg = selectedPost.featuredImage || ogImg;
+    } else if (activeView === 'blog') {
+      title = `Journal & News — ${storeSettings.storeName}`;
+    } else if (activeView === 'shop') {
+      title = `Shop Catalog — ${storeSettings.storeName}`;
+    }
+
+    document.title = title;
+    const setMeta = (selector: string, content: string) => {
+      const el = document.querySelector(selector);
+      if (el && content) el.setAttribute('content', content);
+    };
+    setMeta('meta[name="description"]', desc);
+    setMeta('meta[property="og:title"]', title);
+    setMeta('meta[property="og:description"]', desc);
+    if (ogImg) {
+      let ogImgEl = document.querySelector('meta[property="og:image"]');
+      if (!ogImgEl) {
+        ogImgEl = document.createElement('meta');
+        ogImgEl.setAttribute('property', 'og:image');
+        document.head.appendChild(ogImgEl);
+      }
+      ogImgEl.setAttribute('content', ogImg);
+    }
+
+    if (storeSettings.faviconUrl) {
+      const link = document.querySelector('link[rel="icon"]');
+      if (link) link.setAttribute('href', storeSettings.faviconUrl);
+    }
+  }, [activeView, selectedProduct, selectedPage, selectedPost, storeSettings]);
+
+  const setActiveView = (view: StoreView) => {
+    setActiveViewState(view);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openProductDetail = (product: Product) => {
+    setSelectedProduct(product);
+    window.location.hash = `product/${product.slug || product.id}`;
+    setActiveView('product');
+  };
+
+  const openPageBySlug = (slug: string) => {
+    setSelectedPageSlug(slug);
+    window.location.hash = `page/${slug}`;
+    setActiveView('page');
+  };
+
+  const openPostBySlug = (slug: string) => {
+    setSelectedPostSlug(slug);
+    window.location.hash = `post/${slug}`;
+    setActiveView('post');
+  };
+
+  const navigateToShop = (category: CategorySlug = 'all', queryText?: string) => {
+    setActiveCategory(category);
+    if (queryText !== undefined) {
+      setSearchQuery(queryText);
+    }
+    window.location.hash = category === 'all' ? 'shop' : `shop/${category}`;
+    setActiveView('shop');
+  };
+
+  const navigateTarget = (targetType: string, targetValue: string) => {
+    switch (targetType) {
+      case 'home':
+        window.location.hash = '';
+        setActiveView('home');
+        break;
+      case 'shop':
+        navigateToShop('all', '');
+        break;
+      case 'category':
+        navigateToShop(targetValue || 'all', '');
+        break;
+      case 'product': {
+        const found = products.find((p) => p.id === targetValue || p.slug === targetValue);
+        if (found) openProductDetail(found);
+        else navigateToShop('all', '');
+        break;
+      }
+      case 'page':
+        openPageBySlug(targetValue);
+        break;
+      case 'blog':
+        if (targetValue && targetValue !== 'blog') {
+          openPostBySlug(targetValue);
+        } else {
+          window.location.hash = 'blog';
+          setActiveView('blog');
+        }
+        break;
+      case 'tracking':
+        window.location.hash = 'tracking';
+        setActiveView('tracking');
+        break;
+      case 'admin':
+        setActiveView('admin');
+        break;
+      case 'url':
+        if (targetValue.startsWith('http://') || targetValue.startsWith('https://')) {
+          window.location.assign(targetValue);
+        } else if (targetValue.startsWith('#')) {
+          window.location.hash = targetValue;
+        }
+        break;
+      default:
+        setActiveView('home');
+    }
+  };
+
+  // Sync initial & hashchange routes (#page/slug, #post/slug, #blog, #shop/cat, #product/slug)
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace(/^#/, '');
+      if (!hash) return;
+      if (hash.startsWith('page/')) {
+        setSelectedPageSlug(hash.slice(5));
+        setActiveViewState('page');
+      } else if (hash.startsWith('post/')) {
+        setSelectedPostSlug(hash.slice(5));
+        setActiveViewState('post');
+      } else if (hash === 'blog') {
+        setActiveViewState('blog');
+      } else if (hash === 'tracking') {
+        setActiveViewState('tracking');
+      } else if (hash === 'shop') {
+        setActiveViewState('shop');
+      } else if (hash.startsWith('shop/')) {
+        setActiveCategory(hash.slice(5));
+        setActiveViewState('shop');
+      } else if (hash.startsWith('product/')) {
+        const key = hash.slice(8);
+        const match = products.find((p) => p.slug === key || p.id === key);
+        if (match) {
+          setSelectedProduct(match);
+          setActiveViewState('product');
+        }
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, [products]);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? null : prev));
+    }, 3400);
+  };
+
+  // 1. Public Storefront Firestore Subscriptions
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured) return;
+
+    const unsubProducts = subscribeToProductsFirestore(
+      (list) => setFirestoreProducts(list),
+      (err) => console.warn('Products sync notice:', err.message)
+    );
+    const unsubCategories = subscribeToCategoriesFirestore(
+      (list) => setFirestoreCategories(list),
+      (err) => console.warn('Categories sync notice:', err.message)
+    );
+    const unsubBanners = subscribeToBannersFirestore(
+      (list) => setFirestoreBanners(list),
+      (err) => console.warn('Banners sync notice:', err.message)
+    );
+    const unsubSettings = subscribeToStoreSettingsFirestore(
+      (settings) => setFirestoreSettings(settings),
+      (err) => console.warn('Store settings sync notice:', err.message)
+    );
+    const unsubSections = subscribeToWebsiteSectionsFirestore(
+      (secs) => setFirestoreSections(secs),
+      (err) => console.warn('Sections sync notice:', err.message)
+    );
+    const unsubMenus = subscribeToNavigationMenusFirestore(
+      (menus) => setFirestoreMenus(menus),
+      (err) => console.warn('Menus sync notice:', err.message)
+    );
+    const unsubPublishedSnap = subscribeToPublishedSnapshotFirestore(
+      (snap) => setPublishedSnapshot(snap),
+      (err) => console.warn('Published snapshot notice:', err.message)
+    );
+
+    return () => {
+      unsubProducts();
+      unsubCategories();
+      unsubBanners();
+      unsubSettings();
+      unsubSections();
+      unsubMenus();
+      unsubPublishedSnap();
+    };
+  }, []);
+
+  // Role-aware subscriptions for Pages, Posts, Promotions (Admin gets drafts; public gets published/active only)
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured) return;
+
+    const unsubPages = subscribeToCmsPagesFirestore(
+      isAdmin,
+      (list) => setFirestorePages(list),
+      (err) => console.warn('Pages sync notice:', err.message)
+    );
+    const unsubPosts = subscribeToCmsPostsFirestore(
+      isAdmin,
+      (list) => setFirestorePosts(list),
+      (err) => console.warn('Posts sync notice:', err.message)
+    );
+    const unsubPromos = subscribeToPromotionsFirestore(
+      isAdmin,
+      (list) => setFirestorePromotions(list),
+      (err) => console.warn('Promotions sync notice:', err.message)
+    );
+
+    return () => {
+      unsubPages();
+      unsubPosts();
+      unsubPromos();
+    };
+  }, [isAdmin]);
+
+  // Keep selectedProduct fresh when products update
+  useEffect(() => {
+    if (selectedProduct) {
+      const latest = products.find((p) => p.id === selectedProduct.id);
+      if (latest) setSelectedProduct(latest);
+    }
+  }, [products, selectedProduct?.id]);
+
+  // 2. Auth State Listener
+  useEffect(() => {
+    if (!firebaseStatus.isConfigured) {
+      setAuthLoading(false);
+      return;
+    }
+
+    const unsubAuth = subscribeToAuthState(async (user) => {
+      if (user) {
+        const authUserObj: AuthUser = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || user.email?.split('@')[0] || 'Customer',
+          photoURL: user.photoURL || undefined,
+          emailVerified: user.emailVerified,
+        };
+        setCurrentUser(authUserObj);
+
+        const adminVerified = await checkIsAdminInFirestore(
+          user.uid,
+          user.email,
+          user.emailVerified
+        );
+        setIsAdmin(adminVerified);
+
+        try {
+          const existingProfile = await fetchUserProfile(user.uid);
+          if (existingProfile) {
+            setUserProfile(existingProfile);
+          } else {
+            const newProfile: UserProfile = {
+              uid: user.uid,
+              displayName: authUserObj.displayName,
+              email: authUserObj.email,
+              phone: '',
+              savedAddresses: [],
+            };
+            await saveUserProfile(newProfile);
+            setUserProfile(newProfile);
+          }
+        } catch (err) {
+          console.warn('Could not load customer profile:', err);
+        }
+
+        try {
+          const remoteCart = await fetchUserCartFromFirestore(user.uid);
+          setCart((localCart) => {
+            if (localCart.length === 0 && remoteCart && remoteCart.length > 0) {
+              return remoteCart;
+            }
+            if (localCart.length > 0) {
+              saveUserCartToFirestore(user.uid, localCart).catch(() => {});
+            }
+            return localCart;
+          });
+          hydratedCartUidRef.current = user.uid;
+        } catch (err) {
+          console.warn('Cart hydration notice:', err);
+          hydratedCartUidRef.current = user.uid;
+        }
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+        setIsPreviewMode(false);
+        setUserProfile(null);
+        setCustomerOrders([]);
+        setOrders([]);
+        setWebsiteVersions([]);
+        setFirestoreMedia([]);
+        setNewsletterSubscribers([]);
+        setAdminCustomers([]);
+        hydratedCartUidRef.current = null;
+      }
+      setAuthLoading(false);
+    });
+
+    return () => unsubAuth();
+  }, []);
+
+  // 3. Persist Cart
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_CART_KEY, JSON.stringify(cart));
+    } catch {
+      // ignore storage quota errors
+    }
+
+    if (
+      firebaseStatus.isConfigured &&
+      currentUser?.uid &&
+      hydratedCartUidRef.current === currentUser.uid
+    ) {
       saveUserCartToFirestore(currentUser.uid, cart).catch((err) => {
         console.warn('Failed to sync cart to Firestore:', err);
       });
     }
-    isInitialCartSync.current = false;
   }, [cart, currentUser?.uid]);
 
-  // Sync menu & orders to localStorage for demo offline resilience
-  useEffect(() => {
-    localStorage.setItem('tastehub_menu', JSON.stringify(menuItems));
-  }, [menuItems]);
-
-  useEffect(() => {
-    localStorage.setItem('tastehub_orders', JSON.stringify(orders));
-  }, [orders]);
-
-  // 2. Fetch public menu catalog when Firebase is configured
-  useEffect(() => {
-    if (!firebaseStatus.isConfigured) return;
-
-    fetchMenuItemsFromFirestore()
-      .then((items) => {
-        if (items && items.length > 0) {
-          setMenuItems(items);
-        }
-      })
-      .catch((err) => {
-        console.warn('Falling back to local menu catalog:', err);
-      });
-  }, []);
-
-  // 3. Realtime Auth State Listener for Customers & Staff
-  useEffect(() => {
-    if (!firebaseStatus.isConfigured) return;
-
-    const unsubscribeAuth = subscribeToAuthState(async (user) => {
-      if (user) {
-        const isAuth = user.email?.toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
-        
-        const userObj = {
-          uid: user.uid,
-          email: user.email || '',
-          displayName: user.displayName || user.email?.split('@')[0] || 'Customer',
-          photoURL: user.photoURL || undefined
-        };
-        setCurrentUser(userObj);
-
-        // Fetch or initialize customer profile from Cloud Firestore
-        try {
-          const profile = await fetchUserProfile(user.uid);
-          if (profile) {
-            setUserProfile(profile);
-            // If the user has a saved cart in Firestore and current local cart is empty, restore it
-            if (profile.savedCart && cart.length === 0) {
-              try {
-                const parsedCartData: { menuItemId: string; quantity: number; specialInstructions?: string }[] = JSON.parse(profile.savedCart);
-                const restoredItems: CartItem[] = [];
-                parsedCartData.forEach((saved) => {
-                  const dish = menuItems.find((d) => d.id === saved.menuItemId);
-                  if (dish) {
-                    restoredItems.push({
-                      menuItem: dish,
-                      quantity: saved.quantity,
-                      specialInstructions: saved.specialInstructions
-                    });
-                  }
-                });
-                if (restoredItems.length > 0) {
-                  setCart(restoredItems);
-                }
-              } catch {
-                /* ignore corrupt cart */
-              }
-            }
-          } else {
-            // Create initial profile record in Firestore
-            const initialProfile: UserProfile = {
-              uid: user.uid,
-              displayName: userObj.displayName,
-              email: userObj.email,
-              phone: '',
-              deliveryAddress: ''
-            };
-            await saveUserProfile(initialProfile);
-            setUserProfile(initialProfile);
-          }
-        } catch (err) {
-          console.warn('Could not load user profile from Firestore:', err);
-        }
-
-        if (isAuth) {
-          const adminObj = {
-            email: user.email || '',
-            name: user.displayName || 'Authorized Admin',
-            isAuthorized: true
-          };
-          setAdminUser(adminObj);
-          sessionStorage.setItem('tastehub_admin_session', JSON.stringify(adminObj));
-        }
-      } else {
-        setCurrentUser(null);
-        setUserProfile(null);
-        setCustomerOrders([]);
-        if (!sessionStorage.getItem('tastehub_admin_session')) {
-          setAdminUser(null);
-        }
-      }
-    });
-
-    return () => {
-      unsubscribeAuth();
-    };
-  }, [menuItems]);
-
-  // 4. Realtime Customer Orders Listener (Strictly where userId == currentUser.uid)
+  // 4. Customer Personal Orders Subscription
   useEffect(() => {
     if (!firebaseStatus.isConfigured || !currentUser?.uid) {
       setCustomerOrders([]);
       return;
     }
 
-    const unsubscribeCustomerOrders = subscribeToCustomerOrdersFirestore(
+    const unsubCustomerOrders = subscribeToCustomerOrdersFirestore(
       currentUser.uid,
-      (ordersList) => {
-        setCustomerOrders(ordersList);
-      },
-      (error) => {
-        console.warn('Customer orders subscription notice:', error);
-      }
+      (list) => setCustomerOrders(list),
+      (err) => console.warn('Customer orders subscription notice:', err.message)
     );
 
-    return () => {
-      unsubscribeCustomerOrders();
-    };
+    return () => unsubCustomerOrders();
   }, [currentUser?.uid]);
 
-  // 5. Realtime Orders Listener: STRICTLY for authorized administrators only!
+  // 5. Admin-Only Subscriptions
   useEffect(() => {
-    if (!firebaseStatus.isConfigured || !adminUser?.isAuthorized) {
+    if (!firebaseStatus.isConfigured || !isAdmin) {
       return;
     }
 
-    const unsubscribeOrders = subscribeToOrdersFirestore(
-      (liveOrders) => {
-        if (liveOrders && liveOrders.length > 0) {
-          setOrders(liveOrders);
-        }
-      },
-      (error) => {
-        console.warn('Order subscription error:', error);
-      }
+    const unsubOrders = subscribeToOrdersFirestore(
+      (list) => setOrders(list),
+      (err) => console.warn('Admin orders error:', err.message)
+    );
+    const unsubVersions = subscribeToAdminWebsiteVersionsFirestore(
+      (list) => setWebsiteVersions(list),
+      (err) => console.warn('Website versions error:', err.message)
+    );
+    const unsubMedia = subscribeToMediaLibraryFirestore(
+      (list) => setFirestoreMedia(list),
+      (err) => console.warn('Media library error:', err.message)
+    );
+    const unsubSubs = subscribeToNewsletterSubscribersFirestore(
+      (list) => setNewsletterSubscribers(list),
+      (err) => console.warn('Newsletter subscribers error:', err.message)
+    );
+    const unsubCustomers = subscribeToAllUsersAdminFirestore(
+      (list) => setAdminCustomers(list),
+      (err) => console.warn('Admin customers error:', err.message)
     );
 
     return () => {
-      unsubscribeOrders();
+      unsubOrders();
+      unsubVersions();
+      unsubMedia();
+      unsubSubs();
+      unsubCustomers();
     };
-  }, [adminUser?.isAuthorized]);
+  }, [isAdmin]);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage((prev) => (prev === msg ? null : prev));
-    }, 3200);
-  };
+  // ---------------- CART & PROMO LOGIC ----------------
 
-  // Cart operations
-  const addToCart = (dish: MenuItem, quantity = 1, instructions?: string) => {
-    if (!dish.isAvailable) {
-      showToast('Sorry, this dish is currently sold out!');
-      return;
+  const addToCart = (product: Product, quantity = 1, variationId?: string): boolean => {
+    if (!product.isActive) {
+      showToast('This product is currently unavailable.');
+      return false;
     }
 
+    const variation = variationId
+      ? product.variations.find((v) => v.id === variationId)
+      : product.variations[0];
+
+    const availableStock = variation ? variation.stock : product.stock;
+    if (availableStock <= 0) {
+      showToast('This item is currently out of stock.');
+      return false;
+    }
+
+    const unitPrice = product.price + (variation ? variation.priceAdjustment : 0);
+    const targetVarId = variation?.id;
+
+    let addedSuccessfully = true;
+
     setCart((prev) => {
-      const existingIndex = prev.findIndex((item) => item.menuItem.id === dish.id);
-      if (existingIndex > -1) {
+      const idx = prev.findIndex(
+        (item) => item.productId === product.id && (item.variationId || '') === (targetVarId || '')
+      );
+      if (idx > -1) {
+        const nextQty = Math.min(availableStock, prev[idx].quantity + quantity);
+        if (nextQty === prev[idx].quantity) {
+          addedSuccessfully = false;
+          return prev;
+        }
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + quantity,
-          specialInstructions: instructions || updated[existingIndex].specialInstructions
+        updated[idx] = {
+          ...updated[idx],
+          quantity: nextQty,
+          unitPrice,
+          maxStock: availableStock,
         };
         return updated;
       }
-      return [...prev, { menuItem: dish, quantity, specialInstructions: instructions }];
+
+      const clampedQty = Math.min(availableStock, Math.max(1, quantity));
+      const newItem: CartItem = {
+        productId: product.id,
+        productName: product.name,
+        productImage: product.images[0] || '',
+        categoryName: product.categoryName,
+        unitPrice,
+        variationId: targetVarId,
+        variationLabel: variation ? `${variation.type}: ${variation.name}` : undefined,
+        quantity: clampedQty,
+        maxStock: availableStock,
+      };
+      return [...prev, newItem];
     });
 
-    showToast(`Added ${dish.name} to cart (৳${dish.price})`);
+    if (addedSuccessfully) {
+      showToast(`Added ${product.name} to bag`);
+    } else {
+      showToast(`Maximum available stock (${availableStock}) already in bag`);
+    }
+    return addedSuccessfully;
   };
 
-  const updateCartQuantity = (dishId: string, quantity: number) => {
+  const updateCartQuantity = (productId: string, variationId: string | undefined, quantity: number) => {
     if (quantity <= 0) {
-      removeFromCart(dishId);
+      removeFromCart(productId, variationId);
       return;
     }
     setCart((prev) =>
-      prev.map((item) =>
-        item.menuItem.id === dishId ? { ...item, quantity } : item
-      )
+      prev.map((item) => {
+        if (item.productId === productId && (item.variationId || '') === (variationId || '')) {
+          const clamped = Math.min(item.maxStock || 99, quantity);
+          return { ...item, quantity: clamped };
+        }
+        return item;
+      })
     );
   };
 
-  const removeFromCart = (dishId: string) => {
-    setCart((prev) => prev.filter((item) => item.menuItem.id !== dishId));
-    showToast('Item removed from cart');
+  const removeFromCart = (productId: string, variationId?: string) => {
+    setCart((prev) =>
+      prev.filter(
+        (item) => !(item.productId === productId && (item.variationId || '') === (variationId || ''))
+      )
+    );
+    showToast('Removed from shopping bag');
   };
 
   const clearCart = () => {
     setCart([]);
-    if (currentUser?.uid && firebaseStatus.isConfigured) {
+    if (firebaseStatus.isConfigured && currentUser?.uid) {
       saveUserCartToFirestore(currentUser.uid, []).catch(() => {});
     }
   };
 
-  const cartSubtotal = cart.reduce(
-    (sum, item) => sum + item.menuItem.price * item.quantity,
-    0
-  );
-
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  // Save Customer Profile & Address to Firestore
-  const saveCustomerDetails = async (details: { displayName?: string; phone?: string; deliveryAddress?: string }) => {
-    if (!currentUser?.uid) return;
-
-    const updatedProfile: UserProfile = {
-      uid: currentUser.uid,
-      email: currentUser.email,
-      displayName: details.displayName || userProfile?.displayName || currentUser.displayName || '',
-      phone: details.phone !== undefined ? details.phone : userProfile?.phone,
-      deliveryAddress: details.deliveryAddress !== undefined ? details.deliveryAddress : userProfile?.deliveryAddress
-    };
-
-    if (firebaseStatus.isConfigured) {
-      await saveUserProfile(updatedProfile);
+  const validatePromoCode = (rawCode: string, subtotal: number): PromoValidationResult => {
+    const code = rawCode.trim().toUpperCase();
+    if (!code) {
+      return { valid: false, discountAmount: 0, freeDelivery: false, message: 'Enter a promo code.' };
     }
-    setUserProfile(updatedProfile);
-    showToast('Your customer profile & address have been saved.');
+    const promo = promotions.find((p) => p.code.toUpperCase() === code && p.isActive);
+    if (!promo) {
+      return { valid: false, discountAmount: 0, freeDelivery: false, message: 'Invalid or inactive promo code.' };
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (promo.startDate && today < promo.startDate) {
+      return { valid: false, discountAmount: 0, freeDelivery: false, message: 'This promotion has not started yet.' };
+    }
+    if (promo.endDate && today > promo.endDate) {
+      return { valid: false, discountAmount: 0, freeDelivery: false, message: 'This promo code has expired.' };
+    }
+    if (subtotal < promo.minOrderAmount) {
+      return {
+        valid: false,
+        discountAmount: 0,
+        freeDelivery: false,
+        message: `Minimum order of ${formatBDT(promo.minOrderAmount)} required for ${promo.code}.`,
+      };
+    }
+
+    if (promo.discountType === 'free_delivery') {
+      return {
+        valid: true,
+        promo,
+        discountAmount: 0,
+        freeDelivery: true,
+        message: `Applied ${promo.code}: Free delivery unlocked.`,
+      };
+    }
+
+    const discountAmount =
+      promo.discountType === 'percentage'
+        ? Math.min(subtotal, Math.round((subtotal * promo.discountValue) / 100))
+        : Math.min(subtotal, Math.round(promo.discountValue));
+
+    return {
+      valid: true,
+      promo,
+      discountAmount,
+      freeDelivery: false,
+      message: `Applied ${promo.code}: Saved ${formatBDT(discountAmount)}.`,
+    };
   };
 
-  // Authoritative Order Placement
-  const placeOrder = async (payload: CustomerCheckoutPayload): Promise<Order> => {
-    if (cart.length === 0) {
-      throw new Error('Your cart is empty');
+  const calculateDeliveryFee = (city: string, subtotal: number, promoCode?: string): number => {
+    if (subtotal <= 0) return 0;
+    if (promoCode) {
+      const promoCheck = validatePromoCode(promoCode, subtotal);
+      if (promoCheck.valid && promoCheck.freeDelivery) return 0;
+    }
+    if (storeSettings.freeDeliveryThreshold > 0 && subtotal >= storeSettings.freeDeliveryThreshold) {
+      return 0;
+    }
+    const isDhaka = city.trim().toLowerCase() === 'dhaka';
+    return isDhaka ? storeSettings.insideDhakaDeliveryFee : storeSettings.outsideDhakaDeliveryFee;
+  };
+
+  // ---------------- DRAFT & PUBLISH CMS ACTIONS ----------------
+
+  const persistDraftSnapshot = async (
+    nextSettings: StoreSettings,
+    nextSections: WebsiteSection[],
+    nextMenus: NavigationMenu[]
+  ) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveWebsiteSnapshotToFirestore({
+      id: 'draft',
+      versionLabel: 'Current Admin Draft',
+      settings: nextSettings,
+      sections: nextSections,
+      menus: nextMenus,
+      publishedBy: currentUser?.email || '',
+      publishedAt: new Date().toISOString(),
+    });
+  };
+
+  const updateDraftSettings = async (next: StoreSettings) => {
+    setLocalDraftSettings(next);
+    await persistDraftSnapshot(next, draftSections, draftMenus);
+    showToast('Draft settings saved (not live until published)');
+  };
+
+  const updateDraftSections = async (next: WebsiteSection[]) => {
+    const normalized = next.map((s, idx) => ({ ...s, displayOrder: idx + 1 }));
+    setLocalDraftSections(normalized);
+    await persistDraftSnapshot(draftSettings, normalized, draftMenus);
+  };
+
+  const updateDraftMenus = async (next: NavigationMenu[]) => {
+    setLocalDraftMenus(next);
+    await persistDraftSnapshot(draftSettings, draftSections, next);
+    showToast('Draft navigation saved');
+  };
+
+  const publishWebsiteChanges = async (label?: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    const nowIso = new Date().toISOString();
+    const versionTitle = label?.trim() || `Published ${new Date().toLocaleString()}`;
+
+    const publishedSnap: WebsiteSnapshot = {
+      id: 'published',
+      versionLabel: versionTitle,
+      settings: draftSettings,
+      sections: draftSections,
+      menus: draftMenus,
+      publishedBy: currentUser?.email || '',
+      publishedAt: nowIso,
+    };
+
+    const historySnap: WebsiteSnapshot = {
+      ...publishedSnap,
+      id: `ver-${Date.now()}`,
+    };
+
+    // Write published snapshot + history + underlying collections atomically in parallel
+    await Promise.all([
+      saveWebsiteSnapshotToFirestore(publishedSnap),
+      saveWebsiteSnapshotToFirestore(historySnap),
+      saveStoreSettingsToFirestore(draftSettings),
+      ...draftSections.map((sec) => saveWebsiteSectionToFirestore(sec)),
+      ...draftMenus.map((menu) => saveNavigationMenuToFirestore(menu)),
+    ]);
+
+    // Remove deleted sections if any exist in Firestore
+    const draftIds = new Set(draftSections.map((s) => s.id));
+    await Promise.all(
+      firestoreSections
+        .filter((old) => !draftIds.has(old.id))
+        .map((old) => deleteWebsiteSectionFromFirestore(old.id))
+    );
+
+    const draftMenuIds = new Set(draftMenus.map((m) => m.id));
+    await Promise.all(
+      firestoreMenus
+        .filter((old) => !draftMenuIds.has(old.id))
+        .map((old) => deleteNavigationMenuFromFirestore(old.id))
+    );
+
+    setIsPreviewMode(false);
+    showToast('Website changes published live!');
+  };
+
+  const discardDraftChanges = async () => {
+    setLocalDraftSettings(publishedSettings);
+    setLocalDraftSections(publishedSections);
+    setLocalDraftMenus(publishedMenus);
+    await persistDraftSnapshot(publishedSettings, publishedSections, publishedMenus);
+    showToast('Draft reset to currently published version');
+  };
+
+  const restoreVersionToDraft = async (snapshot: WebsiteSnapshot) => {
+    setLocalDraftSettings(snapshot.settings);
+    setLocalDraftSections(snapshot.sections);
+    setLocalDraftMenus(snapshot.menus);
+    await persistDraftSnapshot(snapshot.settings, snapshot.sections, snapshot.menus);
+    showToast(`Restored "${snapshot.versionLabel}" into draft`);
+  };
+
+  // ---------------- AUTH & PROFILE ACTIONS ----------------
+
+  const loginWithGoogle = async (): Promise<boolean> => {
+    try {
+      const user = await signInWithGoogle();
+      if (!user) return false;
+      setIsAuthModalOpen(false);
+      showToast(`Signed in as ${user.displayName || user.email}`);
+      return true;
+    } catch (err: any) {
+      console.error('Google Sign-In failed:', err);
+      showToast(err?.message || 'Google sign-in failed.');
+      return false;
+    }
+  };
+
+  const loginWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const user = await signInWithEmail(email.trim(), password);
+      if (!user) return false;
+      setIsAuthModalOpen(false);
+      showToast(`Welcome back, ${user.displayName || user.email}`);
+      return true;
+    } catch (err: any) {
+      console.error('Email sign-in error:', err);
+      throw new Error(err?.message || 'Invalid email or password.');
+    }
+  };
+
+  const signupWithEmailPassword = async (
+    name: string,
+    email: string,
+    password: string
+  ): Promise<boolean> => {
+    try {
+      const user = await registerWithEmail(name, email.trim(), password);
+      if (!user) return false;
+      setIsAuthModalOpen(false);
+      showToast(`Account created. Welcome to VEYRA, ${name.trim()}!`);
+      return true;
+    } catch (err: any) {
+      console.error('Email sign-up error:', err);
+      throw new Error(err?.message || 'Could not create account.');
+    }
+  };
+
+  const logout = async (): Promise<void> => {
+    await signOutUser();
+    setCurrentUser(null);
+    setIsAdmin(false);
+    setIsPreviewMode(false);
+    setUserProfile(null);
+    setCustomerOrders([]);
+    setOrders([]);
+    if (activeView === 'admin' || activeView === 'account') {
+      setActiveView('home');
+    }
+    showToast('Signed out');
+  };
+
+  const updateProfileInfo = async (data: { displayName: string; phone: string }) => {
+    if (!currentUser) throw new Error('Sign in required to save profile.');
+    const updated: UserProfile = {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      displayName: data.displayName.trim(),
+      phone: normalizeBDPhone(data.phone),
+      savedAddresses: userProfile?.savedAddresses || [],
+    };
+    await saveUserProfile(updated);
+    setUserProfile(updated);
+    showToast('Profile details saved');
+  };
+
+  const saveAddress = async (address: Omit<SavedAddress, 'id'> & { id?: string }) => {
+    if (!currentUser) throw new Error('Sign in required to save addresses.');
+    const currentAddresses = userProfile?.savedAddresses || [];
+    const targetId = address.id || `addr-${Date.now()}`;
+    const cleanAddr: SavedAddress = {
+      id: targetId,
+      label: address.label.trim() || 'Home',
+      fullName: address.fullName.trim(),
+      phone: normalizeBDPhone(address.phone),
+      city: address.city.trim(),
+      area: address.area.trim(),
+      streetAddress: address.streetAddress.trim(),
+      isDefault: Boolean(address.isDefault),
+    };
+
+    let nextAddresses: SavedAddress[];
+    const exists = currentAddresses.some((a) => a.id === targetId);
+    if (exists) {
+      nextAddresses = currentAddresses.map((a) => (a.id === targetId ? cleanAddr : a));
+    } else {
+      nextAddresses = [...currentAddresses, cleanAddr];
     }
 
-    // Security Re-validation: recalculate prices from authoritative menu item prices
+    if (cleanAddr.isDefault || nextAddresses.length === 1) {
+      nextAddresses = nextAddresses.map((a) => ({ ...a, isDefault: a.id === targetId }));
+    }
+
+    const updated: UserProfile = {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      displayName: userProfile?.displayName || currentUser.displayName,
+      phone: userProfile?.phone || cleanAddr.phone,
+      savedAddresses: nextAddresses,
+    };
+    await saveUserProfile(updated);
+    setUserProfile(updated);
+    showToast('Delivery address saved');
+  };
+
+  const deleteAddress = async (addressId: string) => {
+    if (!currentUser || !userProfile) return;
+    let next = userProfile.savedAddresses.filter((a) => a.id !== addressId);
+    if (next.length > 0 && !next.some((a) => a.isDefault)) {
+      next[0] = { ...next[0], isDefault: true };
+    }
+    const updated: UserProfile = { ...userProfile, savedAddresses: next };
+    await saveUserProfile(updated);
+    setUserProfile(updated);
+    showToast('Address removed');
+  };
+
+  // ---------------- ORDERS & CHECKOUT ----------------
+
+  const placeOrder = async (payload: CheckoutPayload): Promise<Order> => {
+    if (cart.length === 0) {
+      throw new Error('Your shopping bag is empty.');
+    }
+
+    const normalizedPhone = normalizeBDPhone(payload.customerPhone);
+    if (!isValidBDPhone(normalizedPhone)) {
+      throw new Error('Enter a valid Bangladeshi phone number (e.g., 01712345678).');
+    }
+
     let calculatedSubtotal = 0;
     const validatedItems = cart.map((cartItem) => {
-      const catalogItem = menuItems.find((m) => m.id === cartItem.menuItem.id);
-      const actualPrice = catalogItem ? catalogItem.price : cartItem.menuItem.price;
-      calculatedSubtotal += actualPrice * cartItem.quantity;
+      const catalogProduct = products.find((p) => p.id === cartItem.productId);
+      const matchedVariation = catalogProduct?.variations.find(
+        (v) => v.id === cartItem.variationId
+      );
+      const authoritativeUnitPrice = catalogProduct
+        ? catalogProduct.price + (matchedVariation ? matchedVariation.priceAdjustment : 0)
+        : cartItem.unitPrice;
+
+      const lineTotal = authoritativeUnitPrice * cartItem.quantity;
+      calculatedSubtotal += lineTotal;
+
       return {
-        id: cartItem.menuItem.id,
-        name: catalogItem ? catalogItem.name : cartItem.menuItem.name,
-        price: actualPrice,
+        productId: cartItem.productId,
+        productName: catalogProduct ? catalogProduct.name : cartItem.productName,
+        productImage: catalogProduct?.images[0] || cartItem.productImage,
+        variationLabel: matchedVariation
+          ? `${matchedVariation.type}: ${matchedVariation.name}`
+          : cartItem.variationLabel,
+        unitPrice: authoritativeUnitPrice,
         quantity: cartItem.quantity,
-        specialInstructions: cartItem.specialInstructions
+        lineTotal,
       };
     });
 
-    const deliveryFee = payload.orderType === 'delivery' ? 60 : 0;
-    const totalAmount = calculatedSubtotal + deliveryFee;
-
-    // Generate unique order number (e.g. TH-892401)
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const orderId = `TH-${randomSuffix}`;
-
-    const newOrder: Order = {
-      id: orderId,
-      userId: currentUser?.uid || undefined, // Attach authenticated customer UID if signed in
-      customerName: payload.customerName.trim(),
-      customerPhone: payload.customerPhone.trim(),
-      orderType: payload.orderType,
-      deliveryAddress: payload.deliveryAddress?.trim(),
-      orderNotes: payload.orderNotes?.trim(),
-      paymentMethod: payload.paymentMethod,
-      items: validatedItems,
-      itemCount: validatedItems.reduce((acc, curr) => acc + curr.quantity, 0),
-      subtotal: calculatedSubtotal,
-      deliveryFee,
-      totalAmount,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      estimatedTimeMinutes: payload.orderType === 'delivery' ? 40 : 25
-    };
-
-    // If Firebase is configured, strictly persist to Cloud Firestore
-    if (firebaseStatus.isConfigured) {
-      try {
-        await createOrderInFirestore(newOrder);
-
-        // Also update the customer's saved profile with contact details for future checkouts
-        if (currentUser?.uid) {
-          saveUserProfile({
-            uid: currentUser.uid,
-            email: currentUser.email,
-            displayName: payload.customerName.trim(),
-            phone: payload.customerPhone.trim(),
-            deliveryAddress: payload.deliveryAddress?.trim() || userProfile?.deliveryAddress
-          }).catch(() => {});
-        }
-      } catch (err: any) {
-        console.error('Failed to save order to Firestore:', err);
-        let message = 'Failed to record order to Cloud Firestore.';
-        try {
-          const parsed = JSON.parse(err.message);
-          if (parsed.error) message = `Firestore: ${parsed.error}`;
-        } catch {
-          if (err.message) message = err.message;
-        }
-        throw new Error(message);
+    let discountAmount = 0;
+    let appliedPromoCode: string | undefined = undefined;
+    if (payload.promoCode?.trim()) {
+      const promoResult = validatePromoCode(payload.promoCode, calculatedSubtotal);
+      if (promoResult.valid && promoResult.promo) {
+        discountAmount = promoResult.discountAmount;
+        appliedPromoCode = promoResult.promo.code;
       }
     }
 
-    // Only update local state and clear cart when the order has genuinely been saved
-    setOrders((prev) => [newOrder, ...prev]);
-    if (currentUser?.uid) {
-      setCustomerOrders((prev) => [newOrder, ...prev]);
+    const deliveryFee = calculateDeliveryFee(
+      payload.city,
+      calculatedSubtotal,
+      appliedPromoCode
+    );
+    const totalAmount = Math.max(0, calculatedSubtotal - discountAmount + deliveryFee);
+
+    const randomCode = Math.floor(100000 + Math.random() * 900000);
+    const orderNumber = `VY-${randomCode}`;
+
+    const initialPaymentStatus: PaymentStatus =
+      payload.paymentMethod === 'cash_on_delivery' ? 'Unpaid' : 'Pending Verification';
+
+    const newOrder: Order = {
+      id: orderNumber,
+      orderNumber,
+      userId: currentUser?.uid || undefined,
+      customerName: payload.customerName.trim(),
+      customerPhone: normalizedPhone,
+      customerEmail: payload.customerEmail?.trim() || currentUser?.email || undefined,
+      city: payload.city.trim(),
+      area: payload.area.trim(),
+      deliveryAddress: payload.deliveryAddress.trim(),
+      deliveryInstructions: payload.deliveryInstructions?.trim() || undefined,
+      paymentMethod: payload.paymentMethod,
+      paymentStatus: initialPaymentStatus,
+      paymentReference: payload.paymentReference?.trim() || undefined,
+      items: validatedItems,
+      itemCount: validatedItems.reduce((sum, item) => sum + item.quantity, 0),
+      subtotal: calculatedSubtotal,
+      deliveryFee,
+      discountAmount: discountAmount > 0 ? discountAmount : undefined,
+      promoCode: appliedPromoCode,
+      totalAmount,
+      status: 'Pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!firebaseStatus.isConfigured) {
+      throw new Error('Firebase is not configured. Orders must be persisted to Cloud Firestore.');
     }
+
+    try {
+      await createOrderInFirestore(newOrder);
+    } catch (err: any) {
+      console.error('Order write failed:', err);
+      let friendly = 'Could not save your order to Cloud Firestore.';
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed.error) friendly = `Firestore error: ${parsed.error}`;
+      } catch {
+        if (err?.message) friendly = err.message;
+      }
+      throw new Error(friendly);
+    }
+
+    if (currentUser?.uid) {
+      try {
+        if (payload.saveAddressToProfile) {
+          await saveAddress({
+            label: 'Home',
+            fullName: newOrder.customerName,
+            phone: normalizedPhone,
+            city: newOrder.city,
+            area: newOrder.area,
+            streetAddress: newOrder.deliveryAddress,
+            isDefault: (userProfile?.savedAddresses || []).length === 0,
+          });
+        } else if (!userProfile?.phone) {
+          await saveUserProfile({
+            uid: currentUser.uid,
+            email: currentUser.email,
+            displayName: newOrder.customerName,
+            phone: normalizedPhone,
+          });
+        }
+      } catch {
+        // non-blocking profile convenience update
+      }
+    }
+
     setLastOrder(newOrder);
     setTrackedOrder(newOrder);
     clearCart();
     setIsCartOpen(false);
-
+    setActiveView('confirmation');
     return newOrder;
   };
 
-  const trackOrder = (orderId: string): Order | null => {
-    const cleanId = orderId.trim().toUpperCase();
-    const cleanPhone = orderId.trim();
-    const found = orders.find(
-      (o) => o.id.toUpperCase() === cleanId || o.customerPhone === cleanPhone
-    ) || customerOrders.find(
-      (o) => o.id.toUpperCase() === cleanId || o.customerPhone === cleanPhone
+  const lookupOrder = (orderNumberOrId: string): Order | null => {
+    const clean = orderNumberOrId.trim().toUpperCase();
+    if (!clean) return null;
+    const pool = [...customerOrders, ...orders];
+    if (lastOrder) pool.unshift(lastOrder);
+    const found = pool.find(
+      (o) => o.orderNumber.toUpperCase() === clean || o.id.toUpperCase() === clean
     );
     if (found) {
       setTrackedOrder(found);
@@ -510,237 +1379,265 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return null;
   };
 
-  const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
-    if (!adminUser || !adminUser.isAuthorized) {
-      showToast('Unauthorized: Only restaurant administrators can change order status.');
+  const updateOrder = async (
+    orderId: string,
+    updates: { status?: OrderStatus; paymentStatus?: PaymentStatus; adminNotes?: string }
+  ) => {
+    if (!isAdmin) {
+      showToast('Unauthorized: Administrator access required.');
       return;
     }
+    await updateOrderInFirestore(orderId, updates);
+    showToast(`Order ${orderId} updated`);
+  };
 
-    if (firebaseStatus.isConfigured) {
-      try {
-        await updateOrderStatusInFirestore(orderId, newStatus);
-      } catch (err) {
-        console.error('Failed to update order status in Firestore:', err);
-      }
+  // ---------------- ADMIN CRUD ----------------
+
+  const saveProduct = async (product: Product) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveProductToFirestore(product);
+    showToast(`Saved "${product.name}"`);
+  };
+
+  const deleteProduct = async (productId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteProductFromFirestore(productId);
+    showToast('Product deleted');
+  };
+
+  const saveCategory = async (category: Category) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveCategoryToFirestore(category);
+    showToast(`Saved category "${category.name}"`);
+  };
+
+  const deleteCategory = async (categoryId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteCategoryFromFirestore(categoryId);
+    showToast('Category deleted');
+  };
+
+  const saveBanner = async (banner: Banner) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveBannerToFirestore(banner);
+    showToast(`Saved banner "${banner.title}"`);
+  };
+
+  const deleteBanner = async (bannerId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteBannerFromFirestore(bannerId);
+    showToast('Banner deleted');
+  };
+
+  const saveStoreSettings = async (settings: StoreSettings) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveStoreSettingsToFirestore(settings);
+    showToast('Store settings saved');
+  };
+
+  const saveCmsPage = async (page: CmsPage) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveCmsPageToFirestore(page);
+    showToast(`Saved page "${page.title}"`);
+  };
+
+  const deleteCmsPage = async (pageId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteCmsPageFromFirestore(pageId);
+    showToast('Page deleted');
+  };
+
+  const saveCmsPost = async (post: CmsPost) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveCmsPostToFirestore(post);
+    showToast(`Saved post "${post.title}"`);
+  };
+
+  const deleteCmsPost = async (postId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteCmsPostFromFirestore(postId);
+    showToast('Post deleted');
+  };
+
+  const savePromotion = async (promo: Promotion) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await savePromotionToFirestore(promo);
+    showToast(`Saved promo "${promo.code}"`);
+  };
+
+  const deletePromotion = async (promoId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deletePromotionFromFirestore(promoId);
+    showToast('Promotion deleted');
+  };
+
+  const saveMediaAsset = async (asset: MediaAsset) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await saveMediaAssetToFirestore(asset);
+    showToast(`Saved media "${asset.name}"`);
+  };
+
+  const deleteMediaAsset = async (assetId: string, storagePath?: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteMediaAssetFromFirestore(assetId, storagePath);
+    showToast('Media asset removed');
+  };
+
+  const subscribeNewsletter = async (email: string, source: 'footer' | 'section' = 'footer') => {
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      throw new Error('Please enter a valid email address.');
     }
-
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? { ...o, status: newStatus, updatedAt: new Date().toISOString() }
-          : o
-      )
-    );
-
-    setCustomerOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? { ...o, status: newStatus, updatedAt: new Date().toISOString() }
-          : o
-      )
-    );
-
-    if (trackedOrder && trackedOrder.id === orderId) {
-      setTrackedOrder((prev) => (prev ? { ...prev, status: newStatus } : null));
-    }
-
-    showToast(`Order #${orderId} status updated to: ${newStatus.replace('_', ' ').toUpperCase()}`);
+    await subscribeNewsletterInFirestore(email, source);
+    showToast('Subscribed to VEYRA updates.');
   };
 
-  // Menu Management
-  const addMenuItem = async (dishData: Omit<MenuItem, 'id'>) => {
-    const newId = `th-dish-${Date.now().toString().slice(-6)}`;
-    const newDish: MenuItem = {
-      ...dishData,
-      id: newId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    if (firebaseStatus.isConfigured) {
-      try {
-        await saveMenuItemToFirestore(newDish);
-      } catch (err) {
-        console.error('Failed to add dish to Firestore:', err);
-      }
-    }
-
-    setMenuItems((prev) => [newDish, ...prev]);
-    showToast(`Added "${newDish.name}" to menu`);
+  const removeNewsletterSubscriber = async (id: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await deleteNewsletterSubscriberFromFirestore(id);
+    showToast('Subscriber removed');
   };
 
-  const updateMenuItem = async (dish: MenuItem) => {
-    const updated = { ...dish, updatedAt: new Date().toISOString() };
-
-    if (firebaseStatus.isConfigured) {
-      try {
-        await saveMenuItemToFirestore(updated);
-      } catch (err) {
-        console.error('Failed to update dish in Firestore:', err);
-      }
-    }
-
-    setMenuItems((prev) => prev.map((item) => (item.id === dish.id ? updated : item)));
-    showToast(`Updated "${dish.name}"`);
-  };
-
-  const toggleDishAvailability = async (dishId: string) => {
-    const dish = menuItems.find((d) => d.id === dishId);
-    if (!dish) return;
-
-    const updated = { ...dish, isAvailable: !dish.isAvailable };
-    await updateMenuItem(updated);
-    showToast(`Dish is now marked as ${updated.isAvailable ? 'Available' : 'Hidden / Sold Out'}`);
-  };
-
-  const deleteMenuItem = async (dishId: string) => {
-    if (firebaseStatus.isConfigured) {
-      try {
-        await deleteMenuItemFromFirestore(dishId);
-      } catch (err) {
-        console.error('Failed to delete dish from Firestore:', err);
-      }
-    }
-
-    setMenuItems((prev) => prev.filter((d) => d.id !== dishId));
-    showToast('Menu item removed');
-  };
-
-  const resetToDefaultMenu = () => {
-    setMenuItems(INITIAL_MENU_ITEMS);
-    localStorage.removeItem('tastehub_menu');
-    showToast('Menu reset to authentic Bangladeshi sample items');
-  };
-
-  // Customer Auth
-  const loginWithGoogleCustomer = async (): Promise<boolean> => {
-    try {
-      const user = await signInWithGoogle();
-      if (!user) return false;
-      showToast(`Welcome back, ${user.displayName || user.email}!`);
-      return true;
-    } catch (err) {
-      console.error('Customer Google sign-in failed:', err);
-      showToast('Sign-in failed. Please check Firebase Authentication settings.');
-      return false;
-    }
-  };
-
-  const logoutCustomer = async (): Promise<void> => {
-    try {
-      await signOutUser();
-      setCurrentUser(null);
-      setUserProfile(null);
-      setCustomerOrders([]);
-      showToast('You have signed out successfully.');
-    } catch (err) {
-      console.error('Sign out error:', err);
-    }
-  };
-
-  // Admin Auth Handlers
-  const loginAsAdmin = async (passcode?: string): Promise<boolean> => {
-    if (passcode === ADMIN_DEMO_PIN) {
-      const adminObj = {
-        email: AUTHORIZED_ADMIN_EMAIL,
-        name: 'Authorized TasteHub Admin',
-        isAuthorized: true
-      };
-      setAdminUser(adminObj);
-      sessionStorage.setItem('tastehub_admin_session', JSON.stringify(adminObj));
-      showToast('Admin logged in successfully!');
-      return true;
-    }
-    showToast('Invalid management passcode');
-    return false;
-  };
-
-  const loginWithGoogleAdmin = async (): Promise<boolean> => {
-    try {
-      const user = await signInWithGoogle();
-      if (!user) return false;
-
-      const isAuth = user.email?.toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
-      const adminObj = {
-        email: user.email || '',
-        name: user.displayName || 'Authorized Admin',
-        isAuthorized: isAuth
-      };
-      setAdminUser(adminObj);
-      sessionStorage.setItem('tastehub_admin_session', JSON.stringify(adminObj));
-
-      if (isAuth) {
-        showToast(`Welcome authorized admin, ${user.displayName || user.email}!`);
-      } else {
-        showToast(`Notice: ${user.email} is signed in, but not in authorized admin list.`);
-      }
-      return isAuth;
-    } catch (err) {
-      console.error('Google Sign-In failed:', err);
-      showToast('Google Sign-in failed. Please check Firebase configuration.');
-      return false;
-    }
-  };
-
-  const logoutAdmin = () => {
-    signOutUser().catch(() => {});
-    setAdminUser(null);
-    sessionStorage.removeItem('tastehub_admin_session');
-    showToast('Logged out from Admin Dashboard');
+  const seedCatalogToFirestore = async () => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    await Promise.all([
+      ...INITIAL_CATEGORIES.map((c) => saveCategoryToFirestore(c)),
+      ...INITIAL_PRODUCTS.map((p) => saveProductToFirestore(p)),
+      ...INITIAL_BANNERS.map((b) => saveBannerToFirestore(b)),
+      ...INITIAL_WEBSITE_SECTIONS.map((s) => saveWebsiteSectionToFirestore(s)),
+      ...INITIAL_NAVIGATION_MENUS.map((m) => saveNavigationMenuToFirestore(m)),
+      ...INITIAL_CMS_PAGES.map((pg) => saveCmsPageToFirestore(pg)),
+      ...INITIAL_CMS_POSTS.map((pt) => saveCmsPostToFirestore(pt)),
+      ...INITIAL_PROMOTIONS.map((pr) => savePromotionToFirestore(pr)),
+      ...INITIAL_MEDIA_ASSETS.map((ma) => saveMediaAssetToFirestore(ma)),
+      saveStoreSettingsToFirestore(DEFAULT_STORE_SETTINGS),
+      saveWebsiteSnapshotToFirestore({
+        id: 'published',
+        versionLabel: 'Initial VEYRA Release',
+        settings: DEFAULT_STORE_SETTINGS,
+        sections: INITIAL_WEBSITE_SECTIONS,
+        menus: INITIAL_NAVIGATION_MENUS,
+        publishedBy: currentUser?.email || '',
+        publishedAt: new Date().toISOString(),
+      }),
+      saveWebsiteSnapshotToFirestore({
+        id: 'draft',
+        versionLabel: 'Current Admin Draft',
+        settings: DEFAULT_STORE_SETTINGS,
+        sections: INITIAL_WEBSITE_SECTIONS,
+        menus: INITIAL_NAVIGATION_MENUS,
+        publishedBy: currentUser?.email || '',
+        publishedAt: new Date().toISOString(),
+      }),
+    ]);
+    showToast('Complete VEYRA catalog & CMS workspace synced to Cloud Firestore');
   };
 
   return (
     <AppContext.Provider
       value={{
-        menuItems,
-        orders,
-        customerOrders,
-        cart,
-        activeCategory,
-        searchQuery,
+        products,
+        categories,
+        banners,
+        storeSettings,
+        websiteSections,
+        navigationMenus,
+        cmsPages,
+        cmsPosts,
+        promotions,
+        isFirestoreCatalogActive,
+
+        draftSettings,
+        draftSections,
+        draftMenus,
+        publishedSnapshot,
+        websiteVersions,
+        isPreviewMode,
+        setIsPreviewMode,
+        hasUnpublishedChanges,
+        updateDraftSettings,
+        updateDraftSections,
+        updateDraftMenus,
+        publishWebsiteChanges,
+        discardDraftChanges,
+        restoreVersionToDraft,
+
+        mediaAssets,
+        newsletterSubscribers,
+        adminCustomers,
+
         activeView,
-        selectedDish,
-        lastOrder,
-        trackedOrder,
-        adminUser,
-        currentUser,
-        userProfile,
-        firebaseStatus,
-        isCartOpen,
-        isProfileModalOpen,
-        toastMessage,
-
-        setActiveCategory,
-        setSearchQuery,
         setActiveView,
-        setSelectedDish,
-        setIsCartOpen,
-        setIsProfileModalOpen,
-        showToast,
+        selectedProduct,
+        openProductDetail,
+        selectedPage,
+        openPageBySlug,
+        selectedPost,
+        openPostBySlug,
+        navigateTarget,
+        activeCategory,
+        setActiveCategory,
+        searchQuery,
+        setSearchQuery,
+        sortBy,
+        setSortBy,
+        navigateToShop,
 
+        cart,
+        isCartOpen,
+        setIsCartOpen,
         addToCart,
         updateCartQuantity,
         removeFromCart,
         clearCart,
         cartSubtotal,
         cartItemCount,
+        calculateDeliveryFee,
+        validatePromoCode,
 
+        currentUser,
+        authLoading,
+        isAdmin,
+        userProfile,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        loginWithGoogle,
+        loginWithEmailPassword,
+        signupWithEmailPassword,
+        logout,
+        updateProfileInfo,
+        saveAddress,
+        deleteAddress,
+
+        orders,
+        customerOrders,
+        lastOrder,
+        trackedOrder,
         placeOrder,
-        trackOrder,
-        updateOrderStatus,
-        saveCustomerDetails,
+        lookupOrder,
+        updateOrder,
 
-        addMenuItem,
-        updateMenuItem,
-        toggleDishAvailability,
-        deleteMenuItem,
-        resetToDefaultMenu,
+        saveProduct,
+        deleteProduct,
+        saveCategory,
+        deleteCategory,
+        saveBanner,
+        deleteBanner,
+        saveStoreSettings,
+        saveCmsPage,
+        deleteCmsPage,
+        saveCmsPost,
+        deleteCmsPost,
+        savePromotion,
+        deletePromotion,
+        saveMediaAsset,
+        deleteMediaAsset,
+        subscribeNewsletter,
+        removeNewsletterSubscriber,
+        seedCatalogToFirestore,
 
-        loginWithGoogleCustomer,
-        logoutCustomer,
-        loginAsAdmin,
-        loginWithGoogleAdmin,
-        logoutAdmin
+        firebaseStatus,
+        toastMessage,
+        showToast,
       }}
     >
       {children}
@@ -749,9 +1646,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 };
 
 export const useApp = () => {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
 };

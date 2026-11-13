@@ -1,209 +1,300 @@
 {
   "entities": {
-    "MenuItem": {
-      "title": "MenuItem",
-      "description": "A food or beverage item offered on the TasteHub Restaurant menu.",
+    "Product": {
+      "title": "Product",
+      "description": "An e-commerce product listed on the VEYRA storefront.",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier of the menu item",
-          "maxLength": 64
-        },
-        "name": {
-          "type": "string",
-          "description": "Name of the dish in English / Bengali transliteration",
-          "minLength": 2,
-          "maxLength": 100
-        },
-        "category": {
-          "type": "string",
-          "description": "Menu category",
-          "enum": ["biryani-rice", "curries", "kebabs-bites", "appetizers", "desserts-drinks"]
-        },
-        "price": {
-          "type": "number",
-          "description": "Price of the dish in Bangladeshi Taka (BDT)"
-        },
-        "description": {
-          "type": "string",
-          "description": "Detailed mouthwatering description of ingredients and spices",
-          "maxLength": 500
-        },
-        "imageUrl": {
-          "type": "string",
-          "description": "Direct image URL for the dish",
-          "maxLength": 500
-        },
-        "isAvailable": {
-          "type": "boolean",
-          "description": "Whether the dish is currently in stock and orderable"
-        },
-        "spiceLevel": {
-          "type": "string",
-          "description": "Spiciness rating",
-          "enum": ["Mild", "Medium", "Spicy", "Extra Spicy"]
-        },
-        "prepTimeMinutes": {
-          "type": "number",
-          "description": "Estimated preparation time in minutes"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "ISO timestamp of creation"
-        }
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "slug": { "type": "string", "maxLength": 140 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "categoryName": { "type": "string", "maxLength": 80 },
+        "price": { "type": "number" },
+        "compareAtPrice": { "type": "number" },
+        "shortDescription": { "type": "string", "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 4000 },
+        "images": { "type": "string", "description": "Image URLs list" },
+        "stock": { "type": "number" },
+        "sku": { "type": "string", "maxLength": 64 },
+        "variations": { "type": "string", "description": "Variations list" },
+        "isFeatured": { "type": "boolean" },
+        "isNewArrival": { "type": "boolean" },
+        "isBestSeller": { "type": "boolean" },
+        "popularityScore": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "seoTitle": { "type": "string", "maxLength": 160 },
+        "seoDescription": { "type": "string", "maxLength": 320 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "category", "price", "description", "isAvailable"]
+      "required": ["name", "categoryId", "price", "description", "stock", "isActive"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "A VEYRA product category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "slug": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 300 },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "displayOrder": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "slug", "isActive"]
     },
     "UserProfile": {
       "title": "UserProfile",
-      "description": "A customer profile containing saved contact details and persistent cart.",
+      "description": "Authenticated customer profile with saved addresses.",
       "type": "object",
       "properties": {
-        "uid": {
-          "type": "string",
-          "description": "Firebase Auth UID of customer",
-          "maxLength": 128
-        },
-        "displayName": {
-          "type": "string",
-          "description": "Customer full name",
-          "maxLength": 100
-        },
-        "email": {
-          "type": "string",
-          "description": "Customer email",
-          "maxLength": 120
-        },
-        "phone": {
-          "type": "string",
-          "description": "Saved default contact phone number",
-          "maxLength": 20
-        },
-        "deliveryAddress": {
-          "type": "string",
-          "description": "Saved default home/office delivery address",
-          "maxLength": 300
-        },
-        "savedCart": {
-          "type": "string",
-          "description": "JSON serialized persistent cart items",
-          "maxLength": 10000
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp of profile update"
-        }
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 24 },
+        "savedAddresses": { "type": "string", "maxLength": 10000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email"]
     },
-    "Order": {
-      "title": "Order",
-      "description": "A customer food order placed with TasteHub Restaurant.",
+    "Cart": {
+      "title": "Cart",
+      "description": "Synchronized persistent cart for an authenticated customer.",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Public human-readable order number (e.g. TH-89421)",
-          "maxLength": 32
-        },
-        "userId": {
-          "type": "string",
-          "description": "Optional authenticated customer UID for customer order tracking",
-          "maxLength": 128
-        },
-        "customerName": {
-          "type": "string",
-          "description": "Full name of the customer placing the order",
-          "minLength": 2,
-          "maxLength": 100
-        },
-        "customerPhone": {
-          "type": "string",
-          "description": "Bangladeshi contact phone number (e.g. 017XXXXXXXX)",
-          "minLength": 11,
-          "maxLength": 16,
-          "pattern": "^(?:\\+8801|01)[3-9]\\d{8}$"
-        },
-        "orderType": {
-          "type": "string",
-          "description": "Fulfillment method: Delivery or Pickup",
-          "enum": ["delivery", "pickup"]
-        },
-        "deliveryAddress": {
-          "type": "string",
-          "description": "Delivery street address and landmarks if orderType is delivery",
-          "maxLength": 300
-        },
-        "orderNotes": {
-          "type": "string",
-          "description": "Special cooking or delivery instructions",
-          "maxLength": 300
-        },
-        "paymentMethod": {
-          "type": "string",
-          "description": "Strict payment mode: Cash on Delivery or Pay at Pickup",
-          "enum": ["cash_on_delivery", "pay_at_pickup"]
-        },
-        "items": {
-          "type": "string",
-          "description": "Serialized JSON list of ordered items with id, name, price, and quantity"
-        },
-        "itemCount": {
-          "type": "number",
-          "description": "Total number of items in order"
-        },
-        "subtotal": {
-          "type": "number",
-          "description": "Subtotal in BDT before delivery charges"
-        },
-        "deliveryFee": {
-          "type": "number",
-          "description": "Delivery charge in BDT (0 for pickup)"
-        },
-        "totalAmount": {
-          "type": "number",
-          "description": "Total amount in BDT"
-        },
-        "status": {
-          "type": "string",
-          "description": "Current lifecycle status of the order",
-          "enum": ["pending", "confirmed", "preparing", "out_for_delivery", "ready_for_pickup", "completed", "cancelled"]
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Server creation timestamp"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Last status update timestamp"
-        }
+        "uid": { "type": "string", "maxLength": 128 },
+        "items": { "type": "string", "maxLength": 20000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["customerName", "customerPhone", "orderType", "paymentMethod", "items", "subtotal", "totalAmount", "status"]
+      "required": ["uid", "items"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order submitted on VEYRA.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 48 },
+        "orderNumber": { "type": "string", "maxLength": 32 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "customerPhone": { "type": "string", "minLength": 11, "maxLength": 20 },
+        "customerEmail": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "area": { "type": "string", "maxLength": 100 },
+        "deliveryAddress": { "type": "string", "maxLength": 350 },
+        "deliveryInstructions": { "type": "string", "maxLength": 350 },
+        "paymentMethod": { "type": "string", "enum": ["cash_on_delivery", "bkash_manual", "nagad_manual"] },
+        "paymentStatus": { "type": "string", "enum": ["Unpaid", "Pending Verification", "Paid", "Refunded"] },
+        "paymentReference": { "type": "string", "maxLength": 120 },
+        "items": { "type": "string" },
+        "itemCount": { "type": "number" },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "promoCode": { "type": "string", "maxLength": 40 },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "customerName", "customerPhone", "city", "area", "deliveryAddress", "paymentMethod", "paymentStatus", "items", "subtotal", "deliveryFee", "totalAmount", "status"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Homepage hero or editorial promotional banner.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 160 },
+        "subtitle": { "type": "string", "maxLength": 400 },
+        "ctaText": { "type": "string", "maxLength": 60 },
+        "targetCategory": { "type": "string", "maxLength": 64 },
+        "imageUrl": { "type": "string", "maxLength": 1000 },
+        "isActive": { "type": "boolean" },
+        "displayOrder": { "type": "number" }
+      },
+      "required": ["title", "isActive"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Global storefront configuration, theme customizer, header/footer layout, SEO, delivery rates, and payment details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "storeName": { "type": "string", "maxLength": 80 },
+        "tagline": { "type": "string", "maxLength": 160 },
+        "insideDhakaDeliveryFee": { "type": "number" },
+        "outsideDhakaDeliveryFee": { "type": "number" },
+        "freeDeliveryThreshold": { "type": "number" }
+      },
+      "required": ["storeName", "insideDhakaDeliveryFee", "outsideDhakaDeliveryFee"]
+    },
+    "WebsiteSection": {
+      "title": "WebsiteSection",
+      "description": "Configurable homepage visual builder section.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 120 },
+        "heading": { "type": "string", "maxLength": 200 },
+        "isVisible": { "type": "boolean" },
+        "displayOrder": { "type": "number" }
+      },
+      "required": ["id", "type", "name", "isVisible", "displayOrder"]
+    },
+    "WebsiteVersion": {
+      "title": "WebsiteVersion",
+      "description": "Draft, published, or archived storefront configuration snapshot.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "versionLabel": { "type": "string", "maxLength": 120 },
+        "publishedBy": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["id", "versionLabel"]
+    },
+    "NavigationMenu": {
+      "title": "NavigationMenu",
+      "description": "Header, footer, or custom navigation menu with nested dropdown items.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "enum": ["header", "footer", "custom"] }
+      },
+      "required": ["id", "name", "location"]
+    },
+    "CmsPage": {
+      "title": "CmsPage",
+      "description": "Custom storefront page (About, FAQ, Policies, Landing pages).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 160 },
+        "slug": { "type": "string", "maxLength": 140 },
+        "content": { "type": "string", "maxLength": 40000 },
+        "status": { "type": "string", "enum": ["draft", "published"] }
+      },
+      "required": ["title", "slug", "content", "status"]
+    },
+    "CmsPost": {
+      "title": "CmsPost",
+      "description": "Blog article, announcement, campaign, or news post.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 180 },
+        "slug": { "type": "string", "maxLength": 160 },
+        "postType": { "type": "string", "enum": ["blog", "announcement", "product_highlight", "campaign", "news"] },
+        "content": { "type": "string", "maxLength": 50000 },
+        "status": { "type": "string", "enum": ["draft", "published", "scheduled"] },
+        "publishDate": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["title", "slug", "postType", "content", "status"]
+    },
+    "Promotion": {
+      "title": "Promotion",
+      "description": "Promo code, sale label, or free delivery campaign.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "code": { "type": "string", "maxLength": 40 },
+        "title": { "type": "string", "maxLength": 120 },
+        "discountType": { "type": "string", "enum": ["percentage", "fixed", "free_delivery"] },
+        "discountValue": { "type": "number" },
+        "minOrderAmount": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["code", "title", "discountType", "discountValue", "isActive"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Centralized media asset stored in Firebase Storage or external HTTPS URL.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 80 },
+        "name": { "type": "string", "maxLength": 160 },
+        "url": { "type": "string", "maxLength": 1200 },
+        "folder": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["name", "url", "folder"]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Customer email subscribed to VEYRA newsletter updates.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "source": { "type": "string", "enum": ["footer", "section"] },
+        "status": { "type": "string", "enum": ["subscribed", "unsubscribed"] }
+      },
+      "required": ["email", "source", "status"]
     }
   },
   "firestore": {
-    "/menu_items/{menuItemId}": {
-      "schema": {
-        "$ref": "#/entities/MenuItem"
-      },
-      "description": "Public catalog of restaurant dishes, managed by authorized administrators."
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Public product catalog managed by administrators."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Storefront categories managed by administrators."
     },
     "/users/{userId}": {
-      "schema": {
-        "$ref": "#/entities/UserProfile"
-      },
-      "description": "Private customer profile with saved address, phone, and persistent cart. Accessible only by the owner."
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private customer profiles and saved addresses."
+    },
+    "/carts/{userId}": {
+      "schema": { "$ref": "#/entities/Cart" },
+      "description": "Synchronized shopping carts for authenticated customers."
     },
     "/orders/{orderId}": {
-      "schema": {
-        "$ref": "#/entities/Order"
-      },
-      "description": "Restaurant food orders placed by customers, viewable by restaurant managers and the customer who placed them."
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "E-commerce orders readable by owner or authorized administrators."
+    },
+    "/banners/{bannerId}": {
+      "schema": { "$ref": "#/entities/Banner" },
+      "description": "Homepage banners managed by administrators."
+    },
+    "/storeSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store configuration including delivery fees, theme, header/footer, and SEO settings."
+    },
+    "/websiteSections/{sectionId}": {
+      "schema": { "$ref": "#/entities/WebsiteSection" },
+      "description": "Visual homepage builder sections."
+    },
+    "/websiteVersions/{versionId}": {
+      "schema": { "$ref": "#/entities/WebsiteVersion" },
+      "description": "Draft, published, and archived storefront configurations."
+    },
+    "/navigationMenus/{menuId}": {
+      "schema": { "$ref": "#/entities/NavigationMenu" },
+      "description": "Navigation menus for header and footer."
+    },
+    "/pages/{pageId}": {
+      "schema": { "$ref": "#/entities/CmsPage" },
+      "description": "Custom storefront pages (drafts visible only to admins; published pages public)."
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/CmsPost" },
+      "description": "Blog articles and announcements (draft/scheduled visible only to admins; published posts public)."
+    },
+    "/promotions/{promoId}": {
+      "schema": { "$ref": "#/entities/Promotion" },
+      "description": "Active discount codes and campaigns."
+    },
+    "/media/{assetId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Centralized media library metadata managed by administrators."
+    },
+    "/newsletterSubscribers/{subscriberId}": {
+      "schema": { "$ref": "#/entities/NewsletterSubscriber" },
+      "description": "Newsletter email subscribers (write-only for public visitors, readable only by admins)."
     }
   }
 }

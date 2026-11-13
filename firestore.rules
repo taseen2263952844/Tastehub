@@ -23,9 +23,7 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Check if the user is an authorized administrator
-    // 1. Email matched with verified status (bdtaseengaming@gmail.com)
-    // 2. Or explicit entry in /admins/{uid} collection
+    // Role-based administrator check via verified email or /admins/{uid} document
     function isAdmin() {
       return isSignedIn() && (
         (request.auth.token.email == "bdtaseengaming@gmail.com" && request.auth.token.email_verified == true) ||
@@ -34,107 +32,365 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_.@\\-]+$');
     }
 
-    // Validation for MenuItem documents
-    function isValidMenuItem(data) {
-      return data.keys().hasAll(['name', 'category', 'price', 'description', 'isAvailable']) &&
-        data.keys().hasOnly(['id', 'name', 'bengaliName', 'category', 'price', 'description', 'imageUrl', 'isAvailable', 'spiceLevel', 'prepTimeMinutes', 'isChefSpecial', 'portion', 'ingredients', 'createdAt', 'updatedAt']) &&
-        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
-        (!('bengaliName' in data) || (data.bengaliName is string && data.bengaliName.size() <= 100)) &&
-        data.category is string && (data.category in ['biryani-rice', 'curries', 'kebabs-bites', 'appetizers', 'desserts-drinks']) &&
-        data.price is number && data.price >= 0 && data.price <= 50000 &&
-        data.description is string && data.description.size() <= 500 &&
-        data.isAvailable is bool &&
-        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
-        (!('spiceLevel' in data) || (data.spiceLevel in ['Mild', 'Medium', 'Spicy', 'Extra Spicy'])) &&
-        (!('isChefSpecial' in data) || data.isChefSpecial is bool) &&
-        (!('portion' in data) || (data.portion is string && data.portion.size() <= 100)) &&
-        (!('ingredients' in data) || (data.ingredients is list && data.ingredients.size() <= 20)) &&
-        (!('prepTimeMinutes' in data) || (data.prepTimeMinutes is number && data.prepTimeMinutes >= 0 && data.prepTimeMinutes <= 300));
+    // Validation for Product documents
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'categoryId', 'price', 'description', 'stock', 'isActive']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'slug', 'categoryId', 'categoryName', 'price', 'compareAtPrice',
+          'shortDescription', 'description', 'images', 'stock', 'sku', 'variations',
+          'isFeatured', 'isNewArrival', 'isBestSeller', 'popularityScore', 'isActive',
+          'tags', 'seoTitle', 'seoDescription', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
+        data.categoryId is string && data.categoryId.size() <= 64 &&
+        data.price is number && data.price >= 0 && data.price <= 1000000 &&
+        (!('compareAtPrice' in data) || (data.compareAtPrice is number && data.compareAtPrice >= 0 && data.compareAtPrice <= 1000000)) &&
+        data.description is string && data.description.size() <= 4000 &&
+        (!('shortDescription' in data) || (data.shortDescription is string && data.shortDescription.size() <= 350)) &&
+        data.stock is number && data.stock >= 0 && data.stock <= 100000 &&
+        data.isActive is bool &&
+        (!('images' in data) || (data.images is list && data.images.size() <= 12)) &&
+        (!('variations' in data) || (data.variations is list && data.variations.size() <= 30)) &&
+        (!('tags' in data) || (data.tags is list && data.tags.size() <= 20)) &&
+        (!('seoTitle' in data) || (data.seoTitle is string && data.seoTitle.size() <= 160)) &&
+        (!('seoDescription' in data) || (data.seoDescription is string && data.seoDescription.size() <= 320));
     }
 
-    // Validation for customer private profiles & persistent cart
+    // Validation for Category documents
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'slug', 'isActive']) &&
+        data.keys().hasOnly(['id', 'name', 'slug', 'description', 'imageUrl', 'displayOrder', 'isActive', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+        data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 80 &&
+        data.isActive is bool;
+    }
+
+    // Validation for Banner documents
+    function isValidBanner(data) {
+      return data.keys().hasAll(['title', 'isActive']) &&
+        data.keys().hasOnly(['id', 'title', 'subtitle', 'ctaText', 'targetCategory', 'imageUrl', 'isActive', 'displayOrder', 'updatedAt']) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.isActive is bool;
+    }
+
+    // Validation for StoreSettings documents
+    function isValidStoreSettings(data) {
+      return data.keys().hasAll(['storeName', 'insideDhakaDeliveryFee', 'outsideDhakaDeliveryFee']) &&
+        data.keys().hasOnly([
+          'id', 'storeName', 'tagline', 'insideDhakaDeliveryFee', 'outsideDhakaDeliveryFee',
+          'freeDeliveryThreshold', 'bkashEnabled', 'bkashNumber', 'nagadEnabled',
+          'nagadNumber', 'paymentInstructions', 'supportPhone', 'supportEmail',
+          'logoUrl', 'faviconUrl', 'primaryColor', 'secondaryColor', 'backgroundColor',
+          'surfaceColor', 'textColor', 'headingFont', 'bodyFont', 'buttonStyle',
+          'borderRadius', 'layoutWidth', 'socialLinks',
+          'announcementEnabled', 'announcementText', 'announcementBgColor',
+          'announcementTextColor', 'announcementLink',
+          'headerSticky', 'headerShowSearch', 'headerShowAccount', 'headerShowCart',
+          'headerBgColor', 'headerTextColor', 'headerMenuId',
+          'footerDescription', 'footerCopyright', 'footerShowNewsletter',
+          'footerBgColor', 'footerTextColor', 'footerColumns',
+          'metaTitle', 'metaDescription', 'ogImageUrl', 'robotsAllowIndex', 'robotsCustomText',
+          'updatedAt'
+        ]) &&
+        data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 80 &&
+        data.insideDhakaDeliveryFee is number && data.insideDhakaDeliveryFee >= 0 && data.insideDhakaDeliveryFee <= 5000 &&
+        data.outsideDhakaDeliveryFee is number && data.outsideDhakaDeliveryFee >= 0 && data.outsideDhakaDeliveryFee <= 5000;
+    }
+
+    // Validation for WebsiteSection documents
+    function isValidWebsiteSection(data) {
+      return data.keys().hasAll(['id', 'type', 'name', 'isVisible', 'displayOrder']) &&
+        data.keys().hasOnly([
+          'id', 'type', 'name', 'heading', 'subtitle', 'description', 'images',
+          'backgroundColor', 'textColor', 'buttonText', 'buttonTargetType', 'buttonDestination',
+          'productCount', 'productIds', 'categorySlug', 'layout', 'alignment',
+          'isVisible', 'visibleDesktop', 'visibleMobile', 'displayOrder',
+          'countdownEndAt', 'items', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.type is string && data.type.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.isVisible is bool &&
+        data.displayOrder is number &&
+        (!('images' in data) || (data.images is list && data.images.size() <= 20)) &&
+        (!('productIds' in data) || (data.productIds is list && data.productIds.size() <= 24)) &&
+        (!('items' in data) || (data.items is list && data.items.size() <= 20));
+    }
+
+    // Validation for WebsiteVersion snapshots
+    function isValidWebsiteVersion(data) {
+      return data.keys().hasAll(['id', 'versionLabel', 'settings', 'sections', 'menus']) &&
+        data.keys().hasOnly(['id', 'versionLabel', 'settings', 'sections', 'menus', 'publishedBy', 'publishedAt', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.versionLabel is string && data.versionLabel.size() >= 1 && data.versionLabel.size() <= 120 &&
+        data.settings is map &&
+        data.sections is list && data.sections.size() <= 60 &&
+        data.menus is list && data.menus.size() <= 20;
+    }
+
+    // Validation for NavigationMenu documents
+    function isValidNavigationMenu(data) {
+      return data.keys().hasAll(['id', 'name', 'location', 'items']) &&
+        data.keys().hasOnly(['id', 'name', 'location', 'items', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.location in ['header', 'footer', 'custom'] &&
+        data.items is list && data.items.size() <= 30;
+    }
+
+    // Validation for CmsPage documents
+    function isValidCmsPage(data) {
+      return data.keys().hasAll(['id', 'title', 'slug', 'content', 'status']) &&
+        data.keys().hasOnly(['id', 'title', 'slug', 'featuredImage', 'content', 'seoTitle', 'seoDescription', 'status', 'createdAt', 'updatedAt']) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 140 &&
+        data.content is string && data.content.size() <= 40000 &&
+        data.status in ['draft', 'published'];
+    }
+
+    // Validation for CmsPost documents
+    function isValidCmsPost(data) {
+      return data.keys().hasAll(['id', 'title', 'slug', 'postType', 'content', 'status', 'publishDate']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'slug', 'postType', 'excerpt', 'content', 'featuredImage',
+          'galleryImages', 'categories', 'tags', 'seoTitle', 'seoDescription',
+          'status', 'publishDate', 'authorName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 160 &&
+        data.postType in ['blog', 'announcement', 'product_highlight', 'campaign', 'news'] &&
+        data.content is string && data.content.size() <= 50000 &&
+        data.status in ['draft', 'published', 'scheduled'] &&
+        data.publishDate is string && data.publishDate.size() <= 64 &&
+        (!('galleryImages' in data) || (data.galleryImages is list && data.galleryImages.size() <= 20)) &&
+        (!('categories' in data) || (data.categories is list && data.categories.size() <= 15)) &&
+        (!('tags' in data) || (data.tags is list && data.tags.size() <= 25));
+    }
+
+    // Validation for Promotion documents
+    function isValidPromotion(data) {
+      return data.keys().hasAll(['id', 'code', 'title', 'discountType', 'discountValue', 'minOrderAmount', 'isActive']) &&
+        data.keys().hasOnly([
+          'id', 'code', 'title', 'description', 'discountType', 'discountValue',
+          'minOrderAmount', 'saleLabel', 'startDate', 'endDate', 'isActive',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.code is string && data.code.size() >= 2 && data.code.size() <= 40 &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.discountType in ['percentage', 'fixed', 'free_delivery'] &&
+        data.discountValue is number && data.discountValue >= 0 && data.discountValue <= 1000000 &&
+        data.minOrderAmount is number && data.minOrderAmount >= 0 && data.minOrderAmount <= 1000000 &&
+        data.isActive is bool;
+    }
+
+    // Validation for MediaAsset documents
+    function isValidMediaAsset(data) {
+      return data.keys().hasAll(['id', 'name', 'url', 'folder']) &&
+        data.keys().hasOnly(['id', 'name', 'url', 'folder', 'mimeType', 'sizeBytes', 'storagePath', 'uploadedBy', 'createdAt']) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.url is string && data.url.size() >= 4 && data.url.size() <= 1500 &&
+        data.folder in ['products', 'banners', 'posts', 'pages', 'branding', 'general'];
+    }
+
+    // Validation for NewsletterSubscriber documents
+    function isValidNewsletterSubscriber(data) {
+      return data.keys().hasAll(['id', 'email', 'source', 'status']) &&
+        data.keys().hasOnly(['id', 'email', 'source', 'status', 'createdAt']) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+        data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$') &&
+        data.source in ['footer', 'section'] &&
+        data.status in ['subscribed', 'unsubscribed'];
+    }
+
+    // Validation for UserProfile documents
     function isValidUserProfile(data, userId) {
       return data.keys().hasAll(['uid', 'email']) &&
-        data.keys().hasOnly(['uid', 'displayName', 'email', 'phone', 'deliveryAddress', 'savedCart', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'phone', 'savedAddresses', 'updatedAt']) &&
         data.uid == userId &&
         data.uid == request.auth.uid &&
         data.email is string && data.email.size() <= 120 &&
         (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
-        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
-        (!('deliveryAddress' in data) || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300)) &&
-        (!('savedCart' in data) || (data.savedCart is string && data.savedCart.size() <= 10000));
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 24)) &&
+        (!('savedAddresses' in data) || (data.savedAddresses is string && data.savedAddresses.size() <= 10000));
     }
 
-    // Validation for incoming customer orders
+    // Validation for Cart documents
+    function isValidCart(data, userId) {
+      return data.keys().hasAll(['uid', 'items']) &&
+        data.keys().hasOnly(['uid', 'items', 'updatedAt']) &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.items is string && data.items.size() <= 20000;
+    }
+
+    // Validation for incoming Customer Orders
     function isValidOrder(data) {
-      return data.keys().hasAll(['customerName', 'customerPhone', 'orderType', 'paymentMethod', 'items', 'subtotal', 'totalAmount', 'status', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'userId', 'customerName', 'customerPhone', 'orderType', 'deliveryAddress', 'orderNotes', 'paymentMethod', 'items', 'itemCount', 'subtotal', 'deliveryFee', 'totalAmount', 'status', 'createdAt', 'updatedAt', 'estimatedTimeMinutes']) &&
+      return data.keys().hasAll([
+          'orderNumber', 'customerName', 'customerPhone', 'city', 'area',
+          'deliveryAddress', 'paymentMethod', 'paymentStatus', 'items',
+          'itemCount', 'subtotal', 'deliveryFee', 'totalAmount', 'status', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'orderNumber', 'userId', 'customerName', 'customerPhone', 'customerEmail',
+          'city', 'area', 'deliveryAddress', 'deliveryInstructions', 'paymentMethod',
+          'paymentStatus', 'paymentReference', 'items', 'itemCount', 'subtotal',
+          'deliveryFee', 'discountAmount', 'promoCode', 'totalAmount', 'status',
+          'adminNotes', 'createdAt', 'updatedAt'
+        ]) &&
         (!('userId' in data) || (isSignedIn() && data.userId is string && data.userId == request.auth.uid)) &&
+        data.orderNumber is string && data.orderNumber.size() >= 4 && data.orderNumber.size() <= 32 &&
         data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
-        data.customerPhone is string && data.customerPhone.size() >= 11 && data.customerPhone.size() <= 16 &&
+        data.customerPhone is string && data.customerPhone.size() >= 11 && data.customerPhone.size() <= 20 &&
         data.customerPhone.matches('^(?:\\+8801|01)[3-9][0-9]{8}$') &&
-        data.orderType in ['delivery', 'pickup'] &&
-        (data.orderType != 'delivery' || (('deliveryAddress' in data) && data.deliveryAddress is string && data.deliveryAddress.size() >= 5 && data.deliveryAddress.size() <= 300)) &&
-        (!('orderNotes' in data) || (data.orderNotes is string && data.orderNotes.size() <= 300)) &&
-        data.paymentMethod in ['cash_on_delivery', 'pay_at_pickup'] &&
-        data.items is string && data.items.size() <= 10000 &&
-        data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 500000 &&
-        (!('deliveryFee' in data) || (data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 1000)) &&
-        data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 500000 &&
-        (!('estimatedTimeMinutes' in data) || (data.estimatedTimeMinutes is number && data.estimatedTimeMinutes >= 0 && data.estimatedTimeMinutes <= 300)) &&
-        data.status == 'pending' &&
+        (!('customerEmail' in data) || (data.customerEmail is string && data.customerEmail.size() <= 120)) &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 80 &&
+        data.area is string && data.area.size() >= 2 && data.area.size() <= 100 &&
+        data.deliveryAddress is string && data.deliveryAddress.size() >= 5 && data.deliveryAddress.size() <= 350 &&
+        (!('deliveryInstructions' in data) || (data.deliveryInstructions is string && data.deliveryInstructions.size() <= 350)) &&
+        data.paymentMethod in ['cash_on_delivery', 'bkash_manual', 'nagad_manual'] &&
+        data.paymentStatus in ['Unpaid', 'Pending Verification'] &&
+        (!('paymentReference' in data) || (data.paymentReference is string && data.paymentReference.size() <= 120)) &&
+        data.items is string && data.items.size() <= 20000 &&
+        data.itemCount is number && data.itemCount >= 1 && data.itemCount <= 500 &&
+        data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 5000000 &&
+        data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 5000 &&
+        (!('discountAmount' in data) || (data.discountAmount is number && data.discountAmount >= 0 && data.discountAmount <= 5000000)) &&
+        (!('promoCode' in data) || (data.promoCode is string && data.promoCode.size() <= 40)) &&
+        data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 5000000 &&
+        data.status == 'Pending' &&
         data.createdAt == request.time;
     }
 
-    // --- MENU ITEMS COLLECTION ---
-    match /menu_items/{menuItemId} {
-      // Anyone can view the active restaurant menu
+    // --- PRODUCTS COLLECTION ---
+    match /products/{productId} {
       allow read: if true;
-      // Only authorized administrators can add, edit, or delete menu dishes
-      allow create: if isAdmin() && isValidId(menuItemId) && isValidMenuItem(incoming());
-      allow update: if isAdmin() && isValidMenuItem(incoming());
+      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isAdmin() && isValidProduct(incoming());
       allow delete: if isAdmin();
     }
 
-    // --- USER PROFILES & PRIVATE CARTS COLLECTION ---
+    // --- CATEGORIES COLLECTION ---
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
+      allow update: if isAdmin() && isValidCategory(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- BANNERS COLLECTION ---
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(bannerId) && isValidBanner(incoming());
+      allow update: if isAdmin() && isValidBanner(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- STORE SETTINGS COLLECTION ---
+    match /storeSettings/{settingId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidId(settingId) && isValidStoreSettings(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- WEBSITE SECTIONS COLLECTION ---
+    match /websiteSections/{sectionId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidId(sectionId) && isValidWebsiteSection(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- WEBSITE VERSIONS (DRAFT & PUBLISHED SNAPSHOTS) ---
+    match /websiteVersions/{versionId} {
+      // Only the 'published' snapshot is readable by public visitors; drafts & history are strictly admin-only.
+      allow get: if isAdmin() || versionId == 'published';
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(versionId) && isValidWebsiteVersion(incoming());
+      allow delete: if isAdmin() && versionId != 'published';
+    }
+
+    // --- NAVIGATION MENUS COLLECTION ---
+    match /navigationMenus/{menuId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidId(menuId) && isValidNavigationMenu(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- CUSTOM PAGES COLLECTION ---
+    match /pages/{pageId} {
+      allow read: if isAdmin() || resource.data.status == 'published';
+      allow create, update: if isAdmin() && isValidId(pageId) && isValidCmsPage(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- POSTS / BLOG / ANNOUNCEMENTS COLLECTION ---
+    match /posts/{postId} {
+      allow read: if isAdmin() || resource.data.status == 'published';
+      allow create, update: if isAdmin() && isValidId(postId) && isValidCmsPost(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- PROMOTIONS & DISCOUNT CODES ---
+    match /promotions/{promoId} {
+      allow read: if isAdmin() || resource.data.isActive == true;
+      allow create, update: if isAdmin() && isValidId(promoId) && isValidPromotion(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- MEDIA LIBRARY ---
+    match /media/{assetId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(assetId) && isValidMediaAsset(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // --- NEWSLETTER SUBSCRIBERS ---
+    match /newsletterSubscribers/{subscriberId} {
+      allow create: if isValidId(subscriberId) && isValidNewsletterSubscriber(incoming());
+      allow read, update, delete: if isAdmin();
+    }
+
+    // --- USER PROFILES COLLECTION ---
     match /users/{userId} {
-      // Only the authenticated customer can read their own profile, saved address, and cart
-      allow read: if isOwner(userId) && isValidId(userId);
-      // Only the authenticated customer can create or update their own profile
+      allow read: if (isOwner(userId) && isValidId(userId)) || isAdmin();
       allow create, update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming(), userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // --- PERSISTENT CARTS COLLECTION ---
+    match /carts/{userId} {
+      allow read: if isOwner(userId) && isValidId(userId);
+      allow create, update: if isOwner(userId) && isValidId(userId) && isValidCart(incoming(), userId);
       allow delete: if isOwner(userId);
     }
 
     // --- ORDERS COLLECTION ---
     match /orders/{orderId} {
-      // Customers (both signed-in and guests) can create an order with strict validation
       allow create: if isValidId(orderId) && isValidOrder(incoming());
-      
-      // Access Control for Orders:
-      // 1. Authorized managers/admins can read and list all orders for kitchen processing
-      // 2. Authenticated customers can read and list ONLY their own orders (resource.data.userId == request.auth.uid)
-      // 3. Visitors cannot view other customers' orders
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
 
-      // Only administrators can update an order's fulfillment status (e.g. pending -> confirmed -> preparing -> out_for_delivery -> completed)
-      // Customers cannot alter order status, prices, or mark orders as paid.
       allow update: if isAdmin() && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'adminNotes']) &&
-        incoming().status in ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'ready_for_pickup', 'completed', 'cancelled'] &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'adminNotes', 'updatedAt']) &&
+        incoming().status in ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] &&
+        incoming().paymentStatus in ['Unpaid', 'Pending Verification', 'Paid', 'Refunded'] &&
         incoming().updatedAt == request.time
       );
 
-      // Only administrators can remove records if necessary
       allow delete: if isAdmin();
     }
 
     // --- ADMINS COLLECTION ---
     match /admins/{adminId} {
       allow read: if isSignedIn() && request.auth.uid == adminId;
-      allow write: if false; // Provisioned via Firebase Console or Cloud Functions
+      allow write: if false;
+    }
+
+    // Legacy collections kept strictly read-only for admins
+    match /menu_items/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
   }
 }
