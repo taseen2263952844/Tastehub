@@ -93,11 +93,12 @@ service cloud.firestore {
           'footerDescription', 'footerCopyright', 'footerShowNewsletter',
           'footerBgColor', 'footerTextColor', 'footerColumns',
           'metaTitle', 'metaDescription', 'ogImageUrl', 'robotsAllowIndex', 'robotsCustomText',
-          'updatedAt'
+          'bootstrappedCollections', 'updatedAt'
         ]) &&
         data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 80 &&
         data.insideDhakaDeliveryFee is number && data.insideDhakaDeliveryFee >= 0 && data.insideDhakaDeliveryFee <= 5000 &&
-        data.outsideDhakaDeliveryFee is number && data.outsideDhakaDeliveryFee >= 0 && data.outsideDhakaDeliveryFee <= 5000;
+        data.outsideDhakaDeliveryFee is number && data.outsideDhakaDeliveryFee >= 0 && data.outsideDhakaDeliveryFee <= 5000 &&
+        (!('bootstrappedCollections' in data) || (data.bootstrappedCollections is list && data.bootstrappedCollections.size() <= 20));
     }
 
     // Validation for WebsiteSection documents
@@ -379,6 +380,11 @@ service cloud.firestore {
       );
 
       allow delete: if isAdmin();
+
+      match /{subcollection}/{subDocId} {
+        allow read, delete: if isAdmin();
+        allow write: if false;
+      }
     }
 
     // --- ADMINS COLLECTION ---

@@ -10,6 +10,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useApp, formatBDT, isValidBDPhone } from '../context/AppContext';
+import { SavedAddress } from '../types';
+import { ConfirmDeleteModal } from './admin/ConfirmDeleteModal';
 
 export const CustomerAccountView: React.FC = () => {
   const {
@@ -29,6 +31,7 @@ export const CustomerAccountView: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [pendingDeleteAddr, setPendingDeleteAddr] = useState<SavedAddress | null>(null);
 
   // New Address Form
   const [showAddrForm, setShowAddrForm] = useState(false);
@@ -365,7 +368,7 @@ export const CustomerAccountView: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={() => deleteAddress(addr.id)}
+                  onClick={() => setPendingDeleteAddr(addr)}
                   className="p-2 h-fit text-[#5C655F] hover:text-red-700 transition-colors"
                   aria-label="Delete address"
                 >
@@ -419,6 +422,22 @@ export const CustomerAccountView: React.FC = () => {
           </button>
         </form>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDeleteAddr)}
+        onClose={() => setPendingDeleteAddr(null)}
+        title="Delete Saved Address?"
+        itemLabel={
+          pendingDeleteAddr
+            ? `${pendingDeleteAddr.label} — ${pendingDeleteAddr.streetAddress}, ${pendingDeleteAddr.area}, ${pendingDeleteAddr.city}`
+            : ''
+        }
+        description="Removes this delivery address from your account."
+        onConfirm={async () => {
+          if (!pendingDeleteAddr) return;
+          await deleteAddress(pendingDeleteAddr.id);
+        }}
+      />
     </div>
   );
 };

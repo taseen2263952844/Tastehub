@@ -12,6 +12,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { StoreSettings, FooterColumn, FooterLink } from '../../types';
 import { MediaPickerModal } from './MediaPickerModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 export const WebsiteCustomizerPanel: React.FC = () => {
   const { draftSettings, updateDraftSettings, draftMenus, cmsPages, categories } = useApp();
@@ -19,6 +20,11 @@ export const WebsiteCustomizerPanel: React.FC = () => {
   const [subTab, setSubTab] = useState<'global' | 'header' | 'footer' | 'operations'>('global');
   const [saving, setSaving] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<'logoUrl' | 'faviconUrl' | null>(null);
+  const [pendingFooterDelete, setPendingFooterDelete] = useState<
+    | { type: 'column'; colIdx: number; label: string }
+    | { type: 'link'; colIdx: number; lnkIdx: number; label: string }
+    | null
+  >(null);
 
   useEffect(() => {
     setForm(draftSettings);
@@ -48,11 +54,6 @@ export const WebsiteCustomizerPanel: React.FC = () => {
   const updateFooterColumn = (idx: number, nextCol: FooterColumn) => {
     const cols = [...(form.footerColumns || [])];
     cols[idx] = nextCol;
-    setForm({ ...form, footerColumns: cols });
-  };
-
-  const removeFooterColumn = (idx: number) => {
-    const cols = (form.footerColumns || []).filter((_, i) => i !== idx);
     setForm({ ...form, footerColumns: cols });
   };
 
@@ -644,7 +645,13 @@ export const WebsiteCustomizerPanel: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => removeFooterColumn(colIdx)}
+                      onClick={() =>
+                        setPendingFooterDelete({
+                          type: 'column',
+                          colIdx,
+                          label: col.title || `Column ${colIdx + 1}`,
+                        })
+                      }
                       className="p-1.5 rounded-lg text-[#5C655F] hover:text-red-700"
                       aria-label="Delete column"
                     >
@@ -734,10 +741,14 @@ export const WebsiteCustomizerPanel: React.FC = () => {
                         )}
                         <button
                           type="button"
-                          onClick={() => {
-                            const nextLinks = col.links.filter((_, i) => i !== lnkIdx);
-                            updateFooterColumn(colIdx, { ...col, links: nextLinks });
-                          }}
+                          onClick={() =>
+                            setPendingFooterDelete({
+                              type: 'link',
+                              colIdx,
+                              lnkIdx,
+                              label: lnk.label || 'Untitled Link',
+                            })
+                          }
                           className="col-span-1 text-[#5C655F] hover:text-red-700 flex justify-center"
                           aria-label="Remove footer link"
                         >
@@ -863,6 +874,39 @@ export const WebsiteCustomizerPanel: React.FC = () => {
           if (pickerTarget) {
             setForm({ ...form, [pickerTarget]: url });
           }
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingFooterDelete)}
+        onClose={() => setPendingFooterDelete(null)}
+        title={
+          pendingFooterDelete?.type === 'column'
+            ? 'Delete Footer Column?'
+            : 'Delete Footer Link?'
+        }
+        itemLabel={pendingFooterDelete?.label || ''}
+        description="Removes this item and saves the updated footer layout to your Admin Draft."
+        onConfirm={async () => {
+          if (!pendingFooterDelete) return;
+          let nextForm: StoreSettings;
+          if (pendingFooterDelete.type === 'column') {
+            const cols = (form.footerColumns || []).filter(
+              (_, i) => i !== pendingFooterDelete.colIdx
+            );
+            nextForm = { ...form, footerColumns: cols };
+          } else {
+            const cols = [...(form.footerColumns || [])];
+            const targetCol = cols[pendingFooterDelete.colIdx];
+            if (!targetCol) return;
+            cols[pendingFooterDelete.colIdx] = {
+              ...targetCol,
+              links: targetCol.links.filter((_, i) => i !== pendingFooterDelete.lnkIdx),
+            };
+            nextForm = { ...form, footerColumns: cols };
+          }
+          setForm(nextForm);
+          await updateDraftSettings(nextForm);
         }}
       />
     </form>

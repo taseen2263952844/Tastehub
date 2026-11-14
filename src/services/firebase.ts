@@ -15,6 +15,7 @@ import {
   Firestore,
   serverTimestamp,
   getDocFromServer,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -174,6 +175,29 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
+export function formatFirebaseError(err: unknown): string {
+  if (!err) return 'An unexpected error occurred.';
+  const raw = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.error === 'string') {
+      if (parsed.error.toLowerCase().includes('permission')) {
+        return `Permission denied on "${parsed.path || 'database'}". Sign in with your verified administrator account.`;
+      }
+      return parsed.error;
+    }
+  } catch {
+    // not JSON
+  }
+  if (raw.toLowerCase().includes('storage/unauthorized')) {
+    return 'Firebase Storage permission denied. Check your Storage Security Rules.';
+  }
+  if (raw.toLowerCase().includes('network') || raw.toLowerCase().includes('offline')) {
+    return 'Network error while contacting Firebase. Check your internet connection and retry.';
+  }
+  return raw;
+}
+
 function stripUndefined<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
   Object.keys(obj).forEach((k) => {
@@ -226,12 +250,25 @@ export async function uploadAssetWithPath(
   return { url, storagePath };
 }
 
-export async function deleteStorageAsset(storagePath: string): Promise<void> {
-  if (!storage || !storagePath) return;
+export function isFirebaseStorageUrl(url: string): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith('gs://') ||
+    url.includes('firebasestorage.googleapis.com') ||
+    (Boolean(firebaseConfig.storageBucket) && url.includes(firebaseConfig.storageBucket))
+  );
+}
+
+export async function deleteStorageAsset(pathOrUrl: string): Promise<void> {
+  if (!storage || !pathOrUrl) return;
   try {
-    await deleteObject(storageRef(storage, storagePath));
-  } catch (err) {
-    console.warn('Storage file removal notice:', err);
+    await deleteObject(storageRef(storage, pathOrUrl));
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'storage/object-not-found' || String(err?.message || '').includes('object-not-found')) {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -308,7 +345,7 @@ export async function saveProductToFirestore(product: Product): Promise<void> {
 }
 
 export async function deleteProductFromFirestore(productId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `products/${productId}`;
   try {
     await deleteDoc(doc(db, 'products', productId));
@@ -368,7 +405,7 @@ export async function saveCategoryToFirestore(category: Category): Promise<void>
 }
 
 export async function deleteCategoryFromFirestore(categoryId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `categories/${categoryId}`;
   try {
     await deleteDoc(doc(db, 'categories', categoryId));
@@ -429,7 +466,7 @@ export async function saveBannerToFirestore(banner: Banner): Promise<void> {
 }
 
 export async function deleteBannerFromFirestore(bannerId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `banners/${bannerId}`;
   try {
     await deleteDoc(doc(db, 'banners', bannerId));
@@ -532,7 +569,7 @@ export async function saveWebsiteSectionToFirestore(section: WebsiteSection): Pr
 }
 
 export async function deleteWebsiteSectionFromFirestore(sectionId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `websiteSections/${sectionId}`;
   try {
     await deleteDoc(doc(db, 'websiteSections', sectionId));
@@ -675,7 +712,7 @@ export async function saveNavigationMenuToFirestore(menu: NavigationMenu): Promi
 }
 
 export async function deleteNavigationMenuFromFirestore(menuId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `navigationMenus/${menuId}`;
   try {
     await deleteDoc(doc(db, 'navigationMenus', menuId));
@@ -745,7 +782,7 @@ export async function saveCmsPageToFirestore(page: CmsPage): Promise<void> {
 }
 
 export async function deleteCmsPageFromFirestore(pageId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `pages/${pageId}`;
   try {
     await deleteDoc(doc(db, 'pages', pageId));
@@ -823,7 +860,7 @@ export async function saveCmsPostToFirestore(post: CmsPost): Promise<void> {
 }
 
 export async function deleteCmsPostFromFirestore(postId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `posts/${postId}`;
   try {
     await deleteDoc(doc(db, 'posts', postId));
@@ -896,7 +933,7 @@ export async function savePromotionToFirestore(promo: Promotion): Promise<void> 
 }
 
 export async function deletePromotionFromFirestore(promoId: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `promotions/${promoId}`;
   try {
     await deleteDoc(doc(db, 'promotions', promoId));
@@ -961,13 +998,13 @@ export async function saveMediaAssetToFirestore(asset: MediaAsset): Promise<void
 
 export async function deleteMediaAssetFromFirestore(
   assetId: string,
-  storagePath?: string
+  storagePathOrUrl?: string
 ): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `media/${assetId}`;
   try {
-    if (storagePath) {
-      await deleteStorageAsset(storagePath);
+    if (storagePathOrUrl && (storagePathOrUrl.includes('/') || isFirebaseStorageUrl(storagePathOrUrl))) {
+      await deleteStorageAsset(storagePathOrUrl);
     }
     await deleteDoc(doc(db, 'media', assetId));
   } catch (error) {
@@ -1029,7 +1066,7 @@ export function subscribeToNewsletterSubscribersFirestore(
 }
 
 export async function deleteNewsletterSubscriberFromFirestore(id: string): Promise<void> {
-  if (!db) return;
+  if (!db) throw new Error('Firebase Firestore is not configured.');
   const docPath = `newsletterSubscribers/${id}`;
   try {
     await deleteDoc(doc(db, 'newsletterSubscribers', id));
@@ -1096,6 +1133,67 @@ export async function updateOrderInFirestore(
     await updateDoc(doc(db, 'orders', orderId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, docPath);
+  }
+}
+
+const KNOWN_ORDER_SUBCOLLECTIONS = [
+  'items',
+  'orderItems',
+  'statusHistory',
+  'logs',
+  'events',
+  'notes',
+  'payments',
+];
+
+async function deleteOrderSubcollections(orderId: string): Promise<void> {
+  if (!db) return;
+  for (const subcol of KNOWN_ORDER_SUBCOLLECTIONS) {
+    try {
+      const subSnap = await getDocs(collection(db, 'orders', orderId, subcol));
+      if (!subSnap.empty) {
+        const batch = writeBatch(db);
+        subSnap.forEach((docSnap) => {
+          batch.delete(docSnap.ref);
+        });
+        await batch.commit();
+      }
+    } catch (err) {
+      // Ignore empty/non-existent subcollection reads while logging permission errors
+      console.warn(`Order subcollection cleanup notice (${orderId}/${subcol}):`, err);
+    }
+  }
+}
+
+export async function deleteOrderFromFirestore(orderId: string): Promise<void> {
+  if (!db) throw new Error('Firebase Firestore is not configured.');
+  const docPath = `orders/${orderId}`;
+  try {
+    await deleteOrderSubcollections(orderId);
+    await deleteDoc(doc(db, 'orders', orderId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
+  }
+}
+
+export async function deleteOrdersBulkFromFirestore(orderIds: string[]): Promise<void> {
+  if (!db) throw new Error('Firebase Firestore is not configured.');
+  if (orderIds.length === 0) return;
+  for (const orderId of orderIds) {
+    await deleteOrderSubcollections(orderId);
+  }
+  const chunkSize = 400;
+  for (let i = 0; i < orderIds.length; i += chunkSize) {
+    const chunk = orderIds.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    chunk.forEach((id) => {
+      batch.delete(doc(db!, 'orders', id));
+    });
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `orders/${chunk.join(',')}`);
+    }
   }
 }
 

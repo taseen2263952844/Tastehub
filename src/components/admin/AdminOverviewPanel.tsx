@@ -26,6 +26,7 @@ export type AdminSectionTab =
   | 'posts'
   | 'promotions'
   | 'media'
+  | 'storage'
   | 'seo';
 
 interface AdminOverviewPanelProps {

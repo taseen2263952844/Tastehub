@@ -22,6 +22,7 @@ import {
   NavMenuItem,
 } from '../../types';
 import { MediaPickerModal } from './MediaPickerModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 // Helper to insert clean formatting markers into plain-text prose
 function appendFormattingSnippet(current: string, snippet: string): string {
@@ -52,6 +53,7 @@ export const PostsManagerPanel: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PostStatus | 'all'>('all');
   const [editing, setEditing] = useState<CmsPost | null>(null);
+  const [pendingDeletePost, setPendingDeletePost] = useState<CmsPost | null>(null);
   const [tagInput, setTagInput] = useState('');
   const [catInput, setCatInput] = useState('');
   const [mediaTarget, setMediaTarget] = useState<'featured' | 'gallery' | null>(null);
@@ -577,7 +579,7 @@ export const PostsManagerPanel: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => deleteCmsPost(post.id)}
+                  onClick={() => setPendingDeletePost(post)}
                   className="p-2 rounded-lg border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
                   title="Delete Post"
                 >
@@ -606,6 +608,19 @@ export const PostsManagerPanel: React.FC = () => {
           }
         }}
       />
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDeletePost)}
+        onClose={() => setPendingDeletePost(null)}
+        title="Delete Blog Post?"
+        itemLabel={pendingDeletePost?.title || ''}
+        description="This permanently deletes the post from Cloud Firestore, removes it from the public Journal, and cleans up any unreferenced uploaded images."
+        onConfirm={async () => {
+          if (!pendingDeletePost) return;
+          await deleteCmsPost(pendingDeletePost.id);
+          if (editing?.id === pendingDeletePost.id) setEditing(null);
+        }}
+      />
     </div>
   );
 };
@@ -623,6 +638,7 @@ export const PagesManagerPanel: React.FC = () => {
   } = useApp();
 
   const [editing, setEditing] = useState<CmsPage | null>(null);
+  const [pendingDeletePage, setPendingDeletePage] = useState<CmsPage | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
 
   const startNewPage = () => {
@@ -880,7 +896,7 @@ export const PagesManagerPanel: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => deleteCmsPage(page.id)}
+                onClick={() => setPendingDeletePage(page)}
                 className="p-2 rounded-lg border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
                 title="Delete Page"
               >
@@ -900,6 +916,19 @@ export const PagesManagerPanel: React.FC = () => {
           if (editing) setEditing({ ...editing, featuredImage: url });
         }}
       />
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDeletePage)}
+        onClose={() => setPendingDeletePage(null)}
+        title="Delete Custom Page?"
+        itemLabel={pendingDeletePage ? `${pendingDeletePage.title} (#page/${pendingDeletePage.slug})` : ''}
+        description="This permanently deletes the custom page from Cloud Firestore and removes unreferenced page banner imagery."
+        onConfirm={async () => {
+          if (!pendingDeletePage) return;
+          await deleteCmsPage(pendingDeletePage.id);
+          if (editing?.id === pendingDeletePage.id) setEditing(null);
+        }}
+      />
     </div>
   );
 };
@@ -908,10 +937,24 @@ export const PagesManagerPanel: React.FC = () => {
 // 3. NAVIGATION MENUS MANAGER
 // =====================================================================
 export const NavigationManagerPanel: React.FC = () => {
-  const { draftMenus, updateDraftMenus, cmsPages, categories, products, showToast } = useApp();
+  const {
+    draftMenus,
+    updateDraftMenus,
+    deleteNavigationMenu,
+    persistNavigationMenusLiveAndDraft,
+    cmsPages,
+    categories,
+    products,
+  } = useApp();
   const [menus, setMenus] = useState<NavigationMenu[]>(draftMenus);
   const [selectedMenuId, setSelectedMenuId] = useState<string>(draftMenus[0]?.id || '');
   const [saving, setSaving] = useState(false);
+  const [pendingNavDelete, setPendingNavDelete] = useState<
+    | { type: 'menu'; menu: NavigationMenu }
+    | { type: 'item'; menuId: string; itemIdx: number; label: string }
+    | { type: 'child'; menuId: string; itemIdx: number; childIdx: number; label: string }
+    | null
+  >(null);
 
   useEffect(() => {
     setMenus(draftMenus);
@@ -1147,13 +1190,9 @@ export const NavigationManagerPanel: React.FC = () => {
               {menus.length > 1 && (
                 <button
                   type="button"
-                  onClick={() => {
-                    const next = menus.filter((m) => m.id !== activeMenu.id);
-                    setMenus(next);
-                    setSelectedMenuId(next[0]?.id || '');
-                    updateDraftMenus(next);
-                    showToast('Menu deleted from draft');
-                  }}
+                  onClick={() =>
+                    setPendingNavDelete({ type: 'menu', menu: activeMenu })
+                  }
                   className="px-3 py-2 rounded-xl border border-[#E4E0D6] text-xs text-red-700 hover:bg-red-50"
                 >
                   Delete Menu
@@ -1241,10 +1280,14 @@ export const NavigationManagerPanel: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const next = activeMenu.items.filter((_, i) => i !== idx);
-                        updateActiveMenu({ ...activeMenu, items: next });
-                      }}
+                      onClick={() =>
+                        setPendingNavDelete({
+                          type: 'item',
+                          menuId: activeMenu.id,
+                          itemIdx: idx,
+                          label: item.label || 'Untitled Link',
+                        })
+                      }
                       className="p-1.5 rounded bg-white border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
                       title="Remove item"
                     >
@@ -1310,15 +1353,17 @@ export const NavigationManagerPanel: React.FC = () => {
                         <div className="md:col-span-1 flex justify-end">
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = [...activeMenu.items];
-                              const children = (item.children || []).filter(
-                                (_, ci) => ci !== cIdx
-                              );
-                              next[idx] = { ...item, children };
-                              updateActiveMenu({ ...activeMenu, items: next });
-                            }}
+                            onClick={() =>
+                              setPendingNavDelete({
+                                type: 'child',
+                                menuId: activeMenu.id,
+                                itemIdx: idx,
+                                childIdx: cIdx,
+                                label: child.label || 'Untitled Sub-Link',
+                              })
+                            }
                             className="p-1.5 text-[#5C655F] hover:text-red-700"
+                            title="Remove sub-link"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1332,6 +1377,67 @@ export const NavigationManagerPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingNavDelete)}
+        onClose={() => setPendingNavDelete(null)}
+        title={
+          pendingNavDelete?.type === 'menu'
+            ? 'Delete Navigation Menu?'
+            : pendingNavDelete?.type === 'child'
+            ? 'Delete Dropdown Sub-Link?'
+            : 'Delete Navigation Link?'
+        }
+        itemLabel={
+          pendingNavDelete?.type === 'menu'
+            ? `${pendingNavDelete.menu.name} (${pendingNavDelete.menu.location})`
+            : pendingNavDelete?.label || ''
+        }
+        description={
+          pendingNavDelete?.type === 'menu'
+            ? 'This permanently removes the menu from Cloud Firestore, your draft, and your live website navigation.'
+            : 'This permanently deletes the navigation item and immediately updates both your draft and live website menu.'
+        }
+        onConfirm={async () => {
+          if (!pendingNavDelete) return;
+          if (pendingNavDelete.type === 'menu') {
+            await deleteNavigationMenu(pendingNavDelete.menu.id, true);
+            const remaining = menus.filter((m) => m.id !== pendingNavDelete.menu.id);
+            setMenus(remaining);
+            if (selectedMenuId === pendingNavDelete.menu.id) {
+              setSelectedMenuId(remaining[0]?.id || '');
+            }
+          } else if (pendingNavDelete.type === 'item') {
+            const nextMenus = menus.map((m) =>
+              m.id === pendingNavDelete.menuId
+                ? {
+                    ...m,
+                    items: m.items.filter((_, i) => i !== pendingNavDelete.itemIdx),
+                  }
+                : m
+            );
+            await persistNavigationMenusLiveAndDraft(nextMenus, true);
+            setMenus(nextMenus);
+          } else {
+            const nextMenus = menus.map((m) => {
+              if (m.id !== pendingNavDelete.menuId) return m;
+              const nextItems = m.items.map((it, idx) =>
+                idx === pendingNavDelete.itemIdx
+                  ? {
+                      ...it,
+                      children: (it.children || []).filter(
+                        (_, ci) => ci !== pendingNavDelete.childIdx
+                      ),
+                    }
+                  : it
+              );
+              return { ...m, items: nextItems };
+            });
+            await persistNavigationMenusLiveAndDraft(nextMenus, true);
+            setMenus(nextMenus);
+          }
+        }}
+      />
     </div>
   );
 };

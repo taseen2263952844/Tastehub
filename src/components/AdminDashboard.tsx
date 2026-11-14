@@ -28,6 +28,7 @@ import {
   History,
   CheckCircle2,
   Navigation,
+  HardDrive,
 } from 'lucide-react';
 import {
   useApp,
@@ -38,6 +39,7 @@ import {
   Product,
   ProductVariation,
   Category,
+  Order,
   OrderStatus,
   PaymentStatus,
   CategorySlug,
@@ -57,6 +59,8 @@ import {
   SeoSettingsPanel,
 } from './admin/MarketingMediaSeoPanels';
 import { MediaPickerModal } from './admin/MediaPickerModal';
+import { StorageManagementPanel } from './admin/StorageManagementPanel';
+import { ConfirmDeleteModal } from './admin/ConfirmDeleteModal';
 
 const ORDER_STATUSES: OrderStatus[] = [
   'Pending',
@@ -92,6 +96,9 @@ export const AdminDashboard: React.FC = () => {
     deleteCategory,
     saveMediaAsset,
     updateOrder,
+    deleteOrder,
+    deleteOrdersBulk,
+    draftSections,
     setActiveView,
     setIsPreviewMode,
     hasUnpublishedChanges,
@@ -115,6 +122,8 @@ export const AdminDashboard: React.FC = () => {
   const [orderSearch, setOrderSearch] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
 
   // Product Editor State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -128,6 +137,15 @@ export const AdminDashboard: React.FC = () => {
   // Category Editor State
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryMediaOpen, setCategoryMediaOpen] = useState(false);
+
+  // Shared Delete Confirmation State
+  const [pendingDelete, setPendingDelete] = useState<
+    | { kind: 'order'; order: Order }
+    | { kind: 'orders_bulk'; orders: Order[] }
+    | { kind: 'product'; product: Product }
+    | { kind: 'category'; category: Category }
+    | null
+  >(null);
 
   const filteredOrders = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
@@ -156,6 +174,32 @@ export const AdminDashboard: React.FC = () => {
         .sort((a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || '')),
     [websiteVersions]
   );
+
+  const viewingOrder = useMemo(
+    () => (viewingOrderId ? orders.find((o) => o.id === viewingOrderId) || null : null),
+    [orders, viewingOrderId]
+  );
+
+  const allFilteredOrdersSelected =
+    filteredOrders.length > 0 &&
+    filteredOrders.every((o) => selectedOrderIds.includes(o.id));
+
+  const toggleOrderSelection = (id: string) => {
+    setSelectedOrderIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllFilteredOrders = () => {
+    if (allFilteredOrdersSelected) {
+      const filteredSet = new Set(filteredOrders.map((o) => o.id));
+      setSelectedOrderIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+    } else {
+      const next = new Set(selectedOrderIds);
+      filteredOrders.forEach((o) => next.add(o.id));
+      setSelectedOrderIds(Array.from(next));
+    }
+  };
 
   // ---------------- AUTH GATE ----------------
 
@@ -395,6 +439,7 @@ export const AdminDashboard: React.FC = () => {
       items: [
         { id: 'promotions', label: 'Promotions & Subscribers', icon: Tag },
         { id: 'media', label: 'Media Library', icon: ImageIcon },
+        { id: 'storage', label: 'Storage Management', icon: HardDrive },
         { id: 'seo', label: 'SEO & Sitemaps', icon: Globe },
       ],
     },
@@ -624,151 +669,227 @@ export const AdminDashboard: React.FC = () => {
                   </select>
                 </div>
 
+                {/* Bulk Selection Toolbar */}
+                {filteredOrders.length > 0 && (
+                  <div className="bg-white border border-[#E4E0D6] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-[#171C19] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredOrdersSelected}
+                        onChange={toggleSelectAllFilteredOrders}
+                      />
+                      <span>Select All ({filteredOrders.length} shown)</span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedOrderIds.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOrderIds([])}
+                            className="px-3 py-1.5 rounded-lg border border-[#E4E0D6] text-xs text-[#5C655F] hover:text-[#171C19]"
+                          >
+                            Clear ({selectedOrderIds.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targets = orders.filter((o) =>
+                                selectedOrderIds.includes(o.id)
+                              );
+                              if (targets.length > 0) {
+                                setPendingDelete({ kind: 'orders_bulk', orders: targets });
+                              }
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-red-700 text-white text-xs font-semibold hover:bg-red-800 inline-flex items-center gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete Selected ({selectedOrderIds.length})</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {filteredOrders.length === 0 ? (
                   <div className="bg-white border border-[#E4E0D6] rounded-2xl p-10 text-center text-sm text-[#5C655F]">
                     No matching orders found.
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredOrders.map((order) => (
-                      <div
-                        key={order.id}
-                        className="bg-white border border-[#E4E0D6] rounded-2xl p-5 sm:p-6 space-y-4"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-4 pb-3 border-b border-[#E4E0D6]">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2.5">
-                              <span className="font-mono text-base font-semibold text-[#171C19]">
-                                {order.orderNumber}
-                              </span>
-                              <span className="text-xs text-[#5C655F]">
-                                {new Date(order.createdAt).toLocaleString()}
-                              </span>
-                              {order.promoCode && (
-                                <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-[#E9EFEA] text-[#1B3B2B]">
-                                  Promo: {order.promoCode} (-{formatBDT(order.discountAmount || 0)})
-                                </span>
+                    {filteredOrders.map((order) => {
+                      const isSelected = selectedOrderIds.includes(order.id);
+                      return (
+                        <div
+                          key={order.id}
+                          className={`bg-white border rounded-2xl p-5 sm:p-6 space-y-4 transition-colors ${
+                            isSelected ? 'border-[#1B3B2B] ring-1 ring-[#1B3B2B]/20' : 'border-[#E4E0D6]'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-4 pb-3 border-b border-[#E4E0D6]">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleOrderSelection(order.id)}
+                                className="mt-1.5"
+                                aria-label={`Select order ${order.orderNumber}`}
+                              />
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2.5">
+                                  <span className="font-mono text-base font-semibold text-[#171C19]">
+                                    {order.orderNumber}
+                                  </span>
+                                  <span className="text-xs text-[#5C655F]">
+                                    {new Date(order.createdAt).toLocaleString()}
+                                  </span>
+                                  {order.promoCode && (
+                                    <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-[#E9EFEA] text-[#1B3B2B]">
+                                      Promo: {order.promoCode} (-{formatBDT(order.discountAmount || 0)})
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm font-medium text-[#171C19] mt-1">
+                                  {order.customerName} · {order.customerPhone}
+                                </p>
+                                <p className="text-xs text-[#5C655F]">
+                                  {order.deliveryAddress}, {order.area}, {order.city}
+                                </p>
+                                {order.deliveryInstructions && (
+                                  <p className="text-xs text-[#6E8774] mt-1">
+                                    Note: {order.deliveryInstructions}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="text-right space-y-1.5">
+                              <p className="font-mono text-lg font-semibold text-[#1B3B2B] tabular-nums">
+                                {formatBDT(order.totalAmount)}
+                              </p>
+                              <p className="text-xs text-[#5C655F]">
+                                {order.paymentMethod === 'cash_on_delivery'
+                                  ? 'Cash on Delivery'
+                                  : order.paymentMethod === 'bkash_manual'
+                                  ? 'bKash Manual'
+                                  : 'Nagad Manual'}
+                              </p>
+                              {order.paymentReference && (
+                                <p className="font-mono text-xs bg-[#F3F0E8] px-2 py-0.5 rounded inline-block text-[#171C19]">
+                                  Ref: {order.paymentReference}
+                                </p>
                               )}
+                              <div className="flex items-center justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingOrderId(order.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium text-[#171C19] hover:bg-[#F3F0E8] inline-flex items-center gap-1"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Details</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingDelete({ kind: 'order', order })}
+                                  className="px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-xs font-semibold text-red-700 hover:bg-red-100 inline-flex items-center gap-1"
+                                  aria-label={`Delete order ${order.orderNumber}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
                             </div>
-                            <p className="text-sm font-medium text-[#171C19] mt-1">
-                              {order.customerName} · {order.customerPhone}
-                            </p>
-                            <p className="text-xs text-[#5C655F]">
-                              {order.deliveryAddress}, {order.area}, {order.city}
-                            </p>
-                            {order.deliveryInstructions && (
-                              <p className="text-xs text-[#6E8774] mt-1">
-                                Note: {order.deliveryInstructions}
-                              </p>
-                            )}
                           </div>
 
-                          <div className="text-right space-y-1">
-                            <p className="font-mono text-lg font-semibold text-[#1B3B2B] tabular-nums">
-                              {formatBDT(order.totalAmount)}
-                            </p>
-                            <p className="text-xs text-[#5C655F]">
-                              {order.paymentMethod === 'cash_on_delivery'
-                                ? 'Cash on Delivery'
-                                : order.paymentMethod === 'bkash_manual'
-                                ? 'bKash Manual'
-                                : 'Nagad Manual'}
-                            </p>
-                            {order.paymentReference && (
-                              <p className="font-mono text-xs bg-[#F3F0E8] px-2 py-0.5 rounded inline-block text-[#171C19]">
-                                Ref: {order.paymentReference}
-                              </p>
-                            )}
+                          <div className="space-y-1 text-xs text-[#5C655F]">
+                            {order.items.map((item, idx) => (
+                              <div key={idx} className="flex justify-between">
+                                <span>
+                                  {item.productName}
+                                  {item.variationLabel ? ` (${item.variationLabel})` : ''} ×{' '}
+                                  {item.quantity}
+                                </span>
+                                <span className="font-mono tabular-nums">
+                                  {formatBDT(item.lineTotal)}
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        </div>
 
-                        <div className="space-y-1 text-xs text-[#5C655F]">
-                          {order.items.map((item, idx) => (
-                            <div key={idx} className="flex justify-between">
-                              <span>
-                                {item.productName}
-                                {item.variationLabel ? ` (${item.variationLabel})` : ''} ×{' '}
-                                {item.quantity}
-                              </span>
-                              <span className="font-mono tabular-nums">
-                                {formatBDT(item.lineTotal)}
-                              </span>
+                          <div className="pt-3 border-t border-[#E4E0D6] grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
+                                Fulfillment Status
+                              </label>
+                              <select
+                                value={order.status}
+                                onChange={(e) =>
+                                  updateOrder(order.id, {
+                                    status: e.target.value as OrderStatus,
+                                  })
+                                }
+                                className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
+                              >
+                                {ORDER_STATUSES.map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
-                          ))}
-                        </div>
 
-                        <div className="pt-3 border-t border-[#E4E0D6] grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                          <div>
-                            <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
-                              Fulfillment Status
-                            </label>
-                            <select
-                              value={order.status}
-                              onChange={(e) =>
-                                updateOrder(order.id, {
-                                  status: e.target.value as OrderStatus,
-                                })
-                              }
-                              className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
-                            >
-                              {ORDER_STATUSES.map((s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
+                                Payment Status
+                              </label>
+                              <select
+                                value={order.paymentStatus}
+                                onChange={(e) =>
+                                  updateOrder(order.id, {
+                                    paymentStatus: e.target.value as PaymentStatus,
+                                  })
+                                }
+                                className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
+                              >
+                                {PAYMENT_STATUSES.map((ps) => (
+                                  <option key={ps} value={ps}>
+                                    {ps}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
 
-                          <div>
-                            <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
-                              Payment Status
-                            </label>
-                            <select
-                              value={order.paymentStatus}
-                              onChange={(e) =>
-                                updateOrder(order.id, {
-                                  paymentStatus: e.target.value as PaymentStatus,
-                                })
-                              }
-                              className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
-                            >
-                              {PAYMENT_STATUSES.map((ps) => (
-                                <option key={ps} value={ps}>
-                                  {ps}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={noteDrafts[order.id] ?? order.adminNotes ?? ''}
-                              onChange={(e) =>
-                                setNoteDrafts((prev) => ({
-                                  ...prev,
-                                  [order.id]: e.target.value,
-                                }))
-                              }
-                              placeholder="Internal courier / verification note"
-                              className="flex-1 px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateOrder(order.id, {
-                                  adminNotes:
-                                    noteDrafts[order.id] ?? order.adminNotes ?? '',
-                                })
-                              }
-                              className="px-3.5 py-2 rounded-xl bg-[#1B3B2B] text-[#FAF8F4] text-xs font-medium shrink-0"
-                            >
-                              Save
-                            </button>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={noteDrafts[order.id] ?? order.adminNotes ?? ''}
+                                onChange={(e) =>
+                                  setNoteDrafts((prev) => ({
+                                    ...prev,
+                                    [order.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Internal courier / verification note"
+                                className="flex-1 px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateOrder(order.id, {
+                                    adminNotes:
+                                      noteDrafts[order.id] ?? order.adminNotes ?? '',
+                                  })
+                                }
+                                className="px-3.5 py-2 rounded-xl bg-[#1B3B2B] text-[#FAF8F4] text-xs font-medium shrink-0"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1313,7 +1434,7 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteProduct(product.id)}
+                          onClick={() => setPendingDelete({ kind: 'product', product })}
                           className="p-2 rounded-lg border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
                           aria-label={`Delete ${product.name}`}
                         >
@@ -1514,8 +1635,9 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteCategory(c.id)}
+                          onClick={() => setPendingDelete({ kind: 'category', category: c })}
                           className="p-2 rounded-lg border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
+                          aria-label={`Delete category ${c.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1534,6 +1656,7 @@ export const AdminDashboard: React.FC = () => {
             {activeTab === 'posts' && <PostsManagerPanel />}
             {activeTab === 'promotions' && <PromotionsPanel />}
             {activeTab === 'media' && <MediaLibraryPanel />}
+            {activeTab === 'storage' && <StorageManagementPanel />}
             {activeTab === 'seo' && <SeoSettingsPanel />}
           </div>
         </div>
@@ -1661,6 +1784,278 @@ export const AdminDashboard: React.FC = () => {
         onSelect={(url) => {
           if (editingCategory) {
             setEditingCategory({ ...editingCategory, imageUrl: url });
+          }
+        }}
+      />
+
+      {/* Order Details Modal */}
+      {viewingOrder && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setViewingOrderId(null)}
+        >
+          <div
+            className="bg-white border border-[#E4E0D6] rounded-2xl w-full max-w-2xl p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 pb-3 border-b border-[#E4E0D6]">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-[#6E8774] font-semibold">
+                  Order Record
+                </p>
+                <h3 className="font-mono text-2xl font-semibold text-[#171C19] mt-0.5">
+                  {viewingOrder.orderNumber}
+                </h3>
+                <p className="text-xs text-[#5C655F] mt-0.5">
+                  Placed {new Date(viewingOrder.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingOrderId(null)}
+                className="p-1.5 rounded-lg text-[#5C655F] hover:text-[#171C19]"
+                aria-label="Close order details"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] space-y-1">
+                <p className="font-semibold text-[#171C19] text-sm">Customer & Delivery</p>
+                <p className="text-[#171C19] font-medium">{viewingOrder.customerName}</p>
+                <p className="font-mono text-[#5C655F]">{viewingOrder.customerPhone}</p>
+                {viewingOrder.customerEmail && (
+                  <p className="text-[#5C655F]">{viewingOrder.customerEmail}</p>
+                )}
+                <p className="text-[#5C655F] pt-1">
+                  {viewingOrder.deliveryAddress}, {viewingOrder.area}, {viewingOrder.city}
+                </p>
+                {viewingOrder.deliveryInstructions && (
+                  <p className="text-[#6E8774] pt-1">
+                    Instructions: {viewingOrder.deliveryInstructions}
+                  </p>
+                )}
+              </div>
+
+              <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] space-y-2">
+                <p className="font-semibold text-[#171C19] text-sm">Payment & Totals</p>
+                <div className="flex justify-between">
+                  <span className="text-[#5C655F]">Method</span>
+                  <span className="font-medium text-[#171C19]">
+                    {viewingOrder.paymentMethod === 'cash_on_delivery'
+                      ? 'Cash on Delivery'
+                      : viewingOrder.paymentMethod === 'bkash_manual'
+                      ? 'bKash Manual'
+                      : 'Nagad Manual'}
+                  </span>
+                </div>
+                {viewingOrder.paymentReference && (
+                  <div className="flex justify-between">
+                    <span className="text-[#5C655F]">Reference / TrxID</span>
+                    <span className="font-mono text-[#171C19]">{viewingOrder.paymentReference}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-[#5C655F]">Subtotal</span>
+                  <span className="font-mono">{formatBDT(viewingOrder.subtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#5C655F]">Delivery Fee</span>
+                  <span className="font-mono">{formatBDT(viewingOrder.deliveryFee)}</span>
+                </div>
+                {viewingOrder.discountAmount ? (
+                  <div className="flex justify-between text-[#1B3B2B]">
+                    <span>Discount ({viewingOrder.promoCode})</span>
+                    <span className="font-mono">-{formatBDT(viewingOrder.discountAmount)}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between pt-2 border-t border-[#E4E0D6] font-semibold text-sm text-[#1B3B2B]">
+                  <span>Total Amount</span>
+                  <span className="font-mono">{formatBDT(viewingOrder.totalAmount)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Line Items */}
+            <div className="border border-[#E4E0D6] rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 bg-[#FAF8F4] border-b border-[#E4E0D6] text-xs font-semibold text-[#171C19]">
+                Order Items ({viewingOrder.itemCount})
+              </div>
+              <div className="divide-y divide-[#E4E0D6]">
+                {viewingOrder.items.map((item, idx) => (
+                  <div key={idx} className="p-3.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {item.productImage && (
+                        <img
+                          src={item.productImage}
+                          alt={item.productName}
+                          className="w-10 h-10 rounded-lg object-cover border border-[#E4E0D6] shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium text-[#171C19] truncate">{item.productName}</p>
+                        <p className="text-[#5C655F]">
+                          {item.variationLabel ? `${item.variationLabel} · ` : ''}
+                          {formatBDT(item.unitPrice)} × {item.quantity}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="font-mono font-semibold text-[#171C19] tabular-nums shrink-0">
+                      {formatBDT(item.lineTotal)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Inline Status Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
+                  Fulfillment Status
+                </label>
+                <select
+                  value={viewingOrder.status}
+                  onChange={(e) =>
+                    updateOrder(viewingOrder.id, { status: e.target.value as OrderStatus })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
+                >
+                  {ORDER_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider text-[#5C655F] mb-1">
+                  Payment Status
+                </label>
+                <select
+                  value={viewingOrder.paymentStatus}
+                  onChange={(e) =>
+                    updateOrder(viewingOrder.id, {
+                      paymentStatus: e.target.value as PaymentStatus,
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#E4E0D6] text-xs font-medium"
+                >
+                  {PAYMENT_STATUSES.map((ps) => (
+                    <option key={ps} value={ps}>
+                      {ps}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#E4E0D6]">
+              <button
+                type="button"
+                onClick={() =>
+                  setPendingDelete({ kind: 'order', order: viewingOrder })
+                }
+                className="px-4 py-2.5 rounded-xl bg-red-700 text-white text-xs font-semibold hover:bg-red-800 inline-flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Order Permanently</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViewingOrderId(null)}
+                className="px-4 py-2.5 rounded-xl border border-[#E4E0D6] text-xs font-medium text-[#171C19] hover:bg-[#FAF8F4]"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Universal Deletion Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDelete)}
+        onClose={() => setPendingDelete(null)}
+        title={
+          pendingDelete?.kind === 'order'
+            ? 'Delete Order Permanently?'
+            : pendingDelete?.kind === 'orders_bulk'
+            ? 'Delete Selected Orders Permanently?'
+            : pendingDelete?.kind === 'product'
+            ? 'Delete Product?'
+            : 'Delete Product Category?'
+        }
+        itemLabel={
+          pendingDelete?.kind === 'order'
+            ? `Order ${pendingDelete.order.orderNumber} (${pendingDelete.order.customerName} · ${formatBDT(pendingDelete.order.totalAmount)})`
+            : pendingDelete?.kind === 'orders_bulk'
+            ? `${pendingDelete.orders.length} selected order(s): ${pendingDelete.orders
+                .slice(0, 4)
+                .map((o) => o.orderNumber)
+                .join(', ')}${pendingDelete.orders.length > 4 ? '...' : ''}`
+            : pendingDelete?.kind === 'product'
+            ? pendingDelete.product.name
+            : pendingDelete?.kind === 'category'
+            ? `${pendingDelete.category.name} (${pendingDelete.category.slug})`
+            : ''
+        }
+        description={
+          pendingDelete?.kind === 'order'
+            ? 'This permanently removes the order and its subcollections from Cloud Firestore and updates dashboard analytics immediately.'
+            : pendingDelete?.kind === 'orders_bulk'
+            ? 'All selected orders and their subcollections will be permanently erased from Cloud Firestore.'
+            : pendingDelete?.kind === 'product'
+            ? 'Permanently deletes this product from Cloud Firestore, removes homepage section references, and cleans up any unreferenced uploaded product images.'
+            : 'Permanently removes this category from Cloud Firestore and cleans up any unreferenced uploaded category image.'
+        }
+        warningText={
+          pendingDelete?.kind === 'category'
+            ? (() => {
+                const usedCount = products.filter(
+                  (p) => p.categoryId === pendingDelete.category.slug
+                ).length;
+                return usedCount > 0
+                  ? `${usedCount} existing product(s) currently reference category "${pendingDelete.category.slug}". Consider reassigning those products after deletion.`
+                  : undefined;
+              })()
+            : pendingDelete?.kind === 'product'
+            ? (() => {
+                const sectionRefs = draftSections.filter((s) =>
+                  s.productIds?.includes(pendingDelete.product.id)
+                );
+                return sectionRefs.length > 0
+                  ? `This product is currently hand-picked in ${sectionRefs.length} homepage section(s) (${sectionRefs.map((s) => s.name).join(', ')}). Those references will be cleaned up automatically.`
+                  : undefined;
+              })()
+            : undefined
+        }
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          if (pendingDelete.kind === 'order') {
+            const targetId = pendingDelete.order.id;
+            await deleteOrder(targetId);
+            setSelectedOrderIds((prev) => prev.filter((id) => id !== targetId));
+            if (viewingOrderId === targetId) setViewingOrderId(null);
+          } else if (pendingDelete.kind === 'orders_bulk') {
+            const ids = pendingDelete.orders.map((o) => o.id);
+            await deleteOrdersBulk(ids);
+            const idSet = new Set(ids);
+            setSelectedOrderIds((prev) => prev.filter((id) => !idSet.has(id)));
+            if (viewingOrderId && idSet.has(viewingOrderId)) setViewingOrderId(null);
+          } else if (pendingDelete.kind === 'product') {
+            await deleteProduct(pendingDelete.product.id);
+            if (editingProduct?.id === pendingDelete.product.id) {
+              setIsProductFormOpen(false);
+              setEditingProduct(null);
+            }
+          } else if (pendingDelete.kind === 'category') {
+            await deleteCategory(pendingDelete.category.id);
+            if (editingCategory?.id === pendingDelete.category.id) {
+              setEditingCategory(null);
+            }
           }
         }}
       />

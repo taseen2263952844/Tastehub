@@ -21,9 +21,11 @@ import {
   Banner,
   MediaAsset,
   MediaFolder,
+  NewsletterSubscriber,
 } from '../../types';
 import { uploadAssetWithPath } from '../../services/firebase';
 import { MediaPickerModal } from './MediaPickerModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 // =====================================================================
 // 1. PROMOTIONS, BANNERS & NEWSLETTER SUBSCRIBERS
@@ -46,6 +48,12 @@ export const PromotionsPanel: React.FC = () => {
   const [editingBanner, setEditingBanner] = useState<Banner | null>(null);
   const [bannerMediaOpen, setBannerMediaOpen] = useState(false);
   const [subSearch, setSubSearch] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<
+    | { kind: 'promo'; promo: Promotion }
+    | { kind: 'banner'; banner: Banner }
+    | { kind: 'subscriber'; subscriber: NewsletterSubscriber }
+    | null
+  >(null);
 
   const filteredSubs = useMemo(() => {
     const q = subSearch.trim().toLowerCase();
@@ -345,8 +353,9 @@ export const PromotionsPanel: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => deletePromotion(p.id)}
+                  onClick={() => setPendingDelete({ kind: 'promo', promo: p })}
                   className="p-2 rounded-lg border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
+                  title="Delete promo code"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -503,8 +512,9 @@ export const PromotionsPanel: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => deleteBanner(b.id)}
+                  onClick={() => setPendingDelete({ kind: 'banner', banner: b })}
                   className="p-1.5 rounded-lg bg-white border border-[#E4E0D6] text-[#5C655F] hover:text-red-700"
+                  title="Delete banner"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -562,7 +572,7 @@ export const PromotionsPanel: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => removeNewsletterSubscriber(s.id)}
+                  onClick={() => setPendingDelete({ kind: 'subscriber', subscriber: s })}
                   className="text-[#5C655F] hover:text-red-700 p-1"
                   aria-label="Remove subscriber"
                 >
@@ -583,6 +593,46 @@ export const PromotionsPanel: React.FC = () => {
           if (editingBanner) setEditingBanner({ ...editingBanner, imageUrl: url });
         }}
       />
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDelete)}
+        onClose={() => setPendingDelete(null)}
+        title={
+          pendingDelete?.kind === 'promo'
+            ? 'Delete Promotion Code?'
+            : pendingDelete?.kind === 'banner'
+            ? 'Delete Promotional Banner?'
+            : 'Remove Newsletter Subscriber?'
+        }
+        itemLabel={
+          pendingDelete?.kind === 'promo'
+            ? `${pendingDelete.promo.code} — ${pendingDelete.promo.title}`
+            : pendingDelete?.kind === 'banner'
+            ? pendingDelete.banner.title
+            : pendingDelete?.kind === 'subscriber'
+            ? pendingDelete.subscriber.email
+            : ''
+        }
+        description={
+          pendingDelete?.kind === 'promo'
+            ? 'Customers will no longer be able to apply this discount code at checkout.'
+            : pendingDelete?.kind === 'banner'
+            ? 'Removes this promotional banner from Cloud Firestore and cleans up any unreferenced uploaded banner image.'
+            : 'Permanently removes this subscriber email from Cloud Firestore.'
+        }
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          if (pendingDelete.kind === 'promo') {
+            await deletePromotion(pendingDelete.promo.id);
+            if (editingPromo?.id === pendingDelete.promo.id) setEditingPromo(null);
+          } else if (pendingDelete.kind === 'banner') {
+            await deleteBanner(pendingDelete.banner.id);
+            if (editingBanner?.id === pendingDelete.banner.id) setEditingBanner(null);
+          } else {
+            await removeNewsletterSubscriber(pendingDelete.subscriber.id);
+          }
+        }}
+      />
     </div>
   );
 };
@@ -591,8 +641,14 @@ export const PromotionsPanel: React.FC = () => {
 // 2. CENTRALIZED MEDIA LIBRARY
 // =====================================================================
 export const MediaLibraryPanel: React.FC = () => {
-  const { mediaAssets, saveMediaAsset, deleteMediaAsset, currentUser, showToast } =
-    useApp();
+  const {
+    mediaAssets,
+    saveMediaAsset,
+    deleteMediaAsset,
+    getMediaAssetUsages,
+    currentUser,
+    showToast,
+  } = useApp();
 
   const [folderFilter, setFolderFilter] = useState<MediaFolder | 'all'>('all');
   const [uploadFolder, setUploadFolder] = useState<MediaFolder>('general');
@@ -602,6 +658,7 @@ export const MediaLibraryPanel: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
+  const [pendingDeleteAsset, setPendingDeleteAsset] = useState<MediaAsset | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -827,7 +884,7 @@ export const MediaLibraryPanel: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteMediaAsset(asset.id, asset.storagePath)}
+                    onClick={() => setPendingDeleteAsset(asset)}
                     className="p-1 text-[#5C655F] hover:text-red-700"
                     title="Delete asset"
                   >
@@ -839,6 +896,23 @@ export const MediaLibraryPanel: React.FC = () => {
           </div>
         ))}
       </div>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDeleteAsset)}
+        onClose={() => setPendingDeleteAsset(null)}
+        title="Delete Media File?"
+        itemLabel={pendingDeleteAsset?.name || ''}
+        description="Permanently deletes this media library record and removes its associated file from Firebase Storage (if hosted there)."
+        warningText={
+          pendingDeleteAsset && getMediaAssetUsages(pendingDeleteAsset.url).length > 0
+            ? `Warning: This file is currently used by ${getMediaAssetUsages(pendingDeleteAsset.url).join(', ')}. Deleting it may break images on your storefront.`
+            : undefined
+        }
+        onConfirm={async () => {
+          if (!pendingDeleteAsset) return;
+          await deleteMediaAsset(pendingDeleteAsset.id, pendingDeleteAsset.storagePath);
+        }}
+      />
     </div>
   );
 };

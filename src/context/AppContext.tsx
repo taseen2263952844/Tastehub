@@ -76,6 +76,11 @@ import {
   subscribeToAllUsersAdminFirestore,
   createOrderInFirestore,
   updateOrderInFirestore,
+  deleteOrderFromFirestore,
+  deleteOrdersBulkFromFirestore,
+  deleteStorageAsset,
+  isFirebaseStorageUrl,
+  formatFirebaseError,
   subscribeToOrdersFirestore,
   subscribeToCustomerOrdersFirestore,
   fetchUserProfile,
@@ -227,6 +232,8 @@ interface AppContextType {
     orderId: string,
     updates: { status?: OrderStatus; paymentStatus?: PaymentStatus; adminNotes?: string }
   ) => Promise<void>;
+  deleteOrder: (orderId: string) => Promise<void>;
+  deleteOrdersBulk: (orderIds: string[]) => Promise<void>;
 
   // Admin Catalog & CMS Management
   saveProduct: (product: Product) => Promise<void>;
@@ -243,7 +250,12 @@ interface AppContextType {
   savePromotion: (promo: Promotion) => Promise<void>;
   deletePromotion: (promoId: string) => Promise<void>;
   saveMediaAsset: (asset: MediaAsset) => Promise<void>;
-  deleteMediaAsset: (assetId: string, storagePath?: string) => Promise<void>;
+  deleteMediaAsset: (assetId: string, storagePathOrUrl?: string) => Promise<void>;
+  cleanupUnusedMediaAssets: (assets: MediaAsset[]) => Promise<number>;
+  getMediaAssetUsages: (url: string) => string[];
+  deleteWebsiteSection: (sectionId: string, syncLive?: boolean) => Promise<void>;
+  deleteNavigationMenu: (menuId: string, syncLive?: boolean) => Promise<void>;
+  persistNavigationMenusLiveAndDraft: (nextMenus: NavigationMenu[], syncLive?: boolean) => Promise<void>;
   subscribeNewsletter: (email: string, source?: 'footer' | 'section') => Promise<void>;
   removeNewsletterSubscriber: (id: string) => Promise<void>;
   seedCatalogToFirestore: () => Promise<void>;
@@ -311,18 +323,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [localDraftSettings, setLocalDraftSettings] = useState<StoreSettings | null>(null);
   const [localDraftSections, setLocalDraftSections] = useState<WebsiteSection[] | null>(null);
   const [localDraftMenus, setLocalDraftMenus] = useState<NavigationMenu[] | null>(null);
+  const [localBootstrappedCols, setLocalBootstrappedCols] = useState<string[]>([]);
 
   const hydratedCartUidRef = useRef<string | null>(null);
 
-  // Resolved base collections
-  const products = firestoreProducts.length > 0 ? firestoreProducts : INITIAL_PRODUCTS;
-  const categories = firestoreCategories.length > 0 ? firestoreCategories : INITIAL_CATEGORIES;
-  const banners = firestoreBanners.length > 0 ? firestoreBanners : INITIAL_BANNERS;
-  const cmsPages = firestorePages.length > 0 ? firestorePages : INITIAL_CMS_PAGES;
-  const cmsPosts = firestorePosts.length > 0 ? firestorePosts : INITIAL_CMS_POSTS;
-  const promotions = firestorePromotions.length > 0 ? firestorePromotions : INITIAL_PROMOTIONS;
-  const mediaAssets = firestoreMedia.length > 0 ? firestoreMedia : INITIAL_MEDIA_ASSETS;
-  const isFirestoreCatalogActive = firestoreProducts.length > 0;
+  const bootstrappedSet = useMemo(() => {
+    const set = new Set<string>(localBootstrappedCols);
+    (firestoreSettings?.bootstrappedCollections || []).forEach((k) => set.add(k));
+    (publishedSnapshot?.settings?.bootstrappedCollections || []).forEach((k) => set.add(k));
+    return set;
+  }, [
+    localBootstrappedCols,
+    firestoreSettings?.bootstrappedCollections,
+    publishedSnapshot?.settings?.bootstrappedCollections,
+  ]);
+
+  // Resolved base collections — never resurrect INITIAL_* once a collection is managed in Firestore
+  const products =
+    firestoreProducts.length > 0 || bootstrappedSet.has('products')
+      ? firestoreProducts
+      : INITIAL_PRODUCTS;
+  const categories =
+    firestoreCategories.length > 0 || bootstrappedSet.has('categories')
+      ? firestoreCategories
+      : INITIAL_CATEGORIES;
+  const banners =
+    firestoreBanners.length > 0 || bootstrappedSet.has('banners')
+      ? firestoreBanners
+      : INITIAL_BANNERS;
+  const cmsPages =
+    firestorePages.length > 0 || bootstrappedSet.has('cmsPages')
+      ? firestorePages
+      : INITIAL_CMS_PAGES;
+  const cmsPosts =
+    firestorePosts.length > 0 || bootstrappedSet.has('cmsPosts')
+      ? firestorePosts
+      : INITIAL_CMS_POSTS;
+  const promotions =
+    firestorePromotions.length > 0 || bootstrappedSet.has('promotions')
+      ? firestorePromotions
+      : INITIAL_PROMOTIONS;
+  const mediaAssets =
+    firestoreMedia.length > 0 || bootstrappedSet.has('mediaAssets')
+      ? firestoreMedia
+      : INITIAL_MEDIA_ASSETS;
+  const isFirestoreCatalogActive = firestoreProducts.length > 0 || bootstrappedSet.has('products');
 
   // Published configuration (public-facing source of truth)
   const publishedSettings: StoreSettings = useMemo(
@@ -335,24 +380,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const publishedSections: WebsiteSection[] = useMemo(() => {
-    if (publishedSnapshot?.sections && publishedSnapshot.sections.length > 0) {
+    if (Array.isArray(publishedSnapshot?.sections)) {
       return [...publishedSnapshot.sections].sort((a, b) => a.displayOrder - b.displayOrder);
     }
-    if (firestoreSections.length > 0) {
+    if (firestoreSections.length > 0 || bootstrappedSet.has('websiteSections')) {
       return [...firestoreSections].sort((a, b) => a.displayOrder - b.displayOrder);
     }
     return INITIAL_WEBSITE_SECTIONS;
-  }, [publishedSnapshot?.sections, firestoreSections]);
+  }, [publishedSnapshot?.sections, firestoreSections, bootstrappedSet]);
 
   const publishedMenus: NavigationMenu[] = useMemo(() => {
-    if (publishedSnapshot?.menus && publishedSnapshot.menus.length > 0) {
+    if (Array.isArray(publishedSnapshot?.menus)) {
       return publishedSnapshot.menus;
     }
-    if (firestoreMenus.length > 0) {
+    if (firestoreMenus.length > 0 || bootstrappedSet.has('navigationMenus')) {
       return firestoreMenus;
     }
     return INITIAL_NAVIGATION_MENUS;
-  }, [publishedSnapshot?.menus, firestoreMenus]);
+  }, [publishedSnapshot?.menus, firestoreMenus, bootstrappedSet]);
 
   // Draft configuration (Admin editor workspace)
   const remoteDraft = websiteVersions.find((v) => v.id === 'draft');
@@ -368,18 +413,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const draftSections: WebsiteSection[] = useMemo(() => {
     const raw =
       localDraftSections ||
-      (remoteDraft?.sections && remoteDraft.sections.length > 0
-        ? remoteDraft.sections
-        : publishedSections);
+      (Array.isArray(remoteDraft?.sections) ? remoteDraft.sections : publishedSections);
     return [...raw].sort((a, b) => a.displayOrder - b.displayOrder);
   }, [localDraftSections, remoteDraft?.sections, publishedSections]);
 
   const draftMenus: NavigationMenu[] = useMemo(
     () =>
       localDraftMenus ||
-      (remoteDraft?.menus && remoteDraft.menus.length > 0
-        ? remoteDraft.menus
-        : publishedMenus),
+      (Array.isArray(remoteDraft?.menus) ? remoteDraft.menus : publishedMenus),
     [localDraftMenus, remoteDraft?.menus, publishedMenus]
   );
 
@@ -1387,100 +1428,603 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('Unauthorized: Administrator access required.');
       return;
     }
-    await updateOrderInFirestore(orderId, updates);
-    showToast(`Order ${orderId} updated`);
+    try {
+      await updateOrderInFirestore(orderId, updates);
+      showToast(`Order ${orderId} updated`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const deleteOrder = async (orderId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await deleteOrderFromFirestore(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setCustomerOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setLastOrder((prev) => (prev?.id === orderId ? null : prev));
+      setTrackedOrder((prev) => (prev?.id === orderId ? null : prev));
+      showToast(`Order ${orderId} permanently deleted`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const deleteOrdersBulk = async (orderIds: string[]) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    if (orderIds.length === 0) return;
+    try {
+      await deleteOrdersBulkFromFirestore(orderIds);
+      const idSet = new Set(orderIds);
+      setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+      setCustomerOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+      setLastOrder((prev) => (prev && idSet.has(prev.id) ? null : prev));
+      setTrackedOrder((prev) => (prev && idSet.has(prev.id) ? null : prev));
+      showToast(`Permanently deleted ${orderIds.length} order(s)`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  // ---------------- COLLECTION BOOTSTRAP & STORAGE CLEANUP HELPERS ----------------
+
+  const markCollectionBootstrapped = async (collectionKeys: string[]) => {
+    const missing = collectionKeys.filter((k) => !bootstrappedSet.has(k));
+    if (missing.length === 0) return;
+    const nextList = Array.from(new Set([...bootstrappedSet, ...collectionKeys]));
+    setLocalBootstrappedCols(nextList);
+    try {
+      await saveStoreSettingsToFirestore({
+        ...publishedSettings,
+        bootstrappedCollections: nextList,
+      });
+    } catch (err) {
+      console.warn('Could not persist bootstrappedCollections marker:', err);
+    }
+  };
+
+  const prepareCollectionBeforeDelete = async <T extends { id: string }>(
+    collectionKey: string,
+    firestoreItems: T[],
+    initialItems: T[],
+    excludeIds: string[],
+    saveFn: (item: T) => Promise<void>
+  ) => {
+    const excludeSet = new Set(excludeIds);
+    if (firestoreItems.length === 0 && !bootstrappedSet.has(collectionKey)) {
+      const toKeep = initialItems.filter((item) => !excludeSet.has(item.id));
+      await Promise.all(toKeep.map((item) => saveFn(item)));
+    }
+    await markCollectionBootstrapped([collectionKey]);
+  };
+
+  const computeMediaUsages = (
+    url: string,
+    exclude?: { kind: string; id: string }
+  ): string[] => {
+    if (!url) return [];
+    const refs: string[] = [];
+
+    products.forEach((p) => {
+      if (exclude?.kind === 'product' && exclude.id === p.id) return;
+      if (p.images?.includes(url)) refs.push(`Product: ${p.name}`);
+    });
+    categories.forEach((c) => {
+      if (exclude?.kind === 'category' && exclude.id === c.id) return;
+      if (c.imageUrl === url) refs.push(`Category: ${c.name}`);
+    });
+    banners.forEach((b) => {
+      if (exclude?.kind === 'banner' && exclude.id === b.id) return;
+      if (b.imageUrl === url) refs.push(`Banner: ${b.title}`);
+    });
+    cmsPages.forEach((pg) => {
+      if (exclude?.kind === 'page' && exclude.id === pg.id) return;
+      if (pg.featuredImage === url) refs.push(`Page: ${pg.title}`);
+    });
+    cmsPosts.forEach((pt) => {
+      if (exclude?.kind === 'post' && exclude.id === pt.id) return;
+      if (pt.featuredImage === url || pt.galleryImages?.includes(url)) {
+        refs.push(`Post: ${pt.title}`);
+      }
+    });
+    [...draftSections, ...publishedSections].forEach((sec) => {
+      if (exclude?.kind === 'section' && exclude.id === sec.id) return;
+      if (sec.images?.includes(url)) {
+        refs.push(`Homepage Section: ${sec.name || sec.heading}`);
+      }
+    });
+
+    const settingsList = [publishedSettings, draftSettings];
+    settingsList.forEach((st) => {
+      if (st.logoUrl === url) refs.push('Brand Logo');
+      if (st.faviconUrl === url) refs.push('Site Favicon');
+      if (st.ogImageUrl === url) refs.push('SEO Share Image');
+    });
+
+    return Array.from(new Set(refs));
+  };
+
+  const getMediaAssetUsages = (url: string): string[] => computeMediaUsages(url);
+
+  const cleanupUnreferencedStorageUrls = async (
+    urlsToCheck: (string | undefined)[],
+    exclude: { kind: string; id: string }
+  ) => {
+    const uniqueUrls = Array.from(
+      new Set(urlsToCheck.filter((u): u is string => Boolean(u && isFirebaseStorageUrl(u))))
+    );
+    for (const url of uniqueUrls) {
+      const remainingRefs = computeMediaUsages(url, exclude);
+      if (remainingRefs.length === 0) {
+        const mediaRecord = firestoreMedia.find((m) => m.url === url);
+        try {
+          await deleteStorageAsset(mediaRecord?.storagePath || url);
+          if (mediaRecord) {
+            await deleteMediaAssetFromFirestore(mediaRecord.id);
+          }
+        } catch (err) {
+          console.warn('Non-blocking unreferenced Storage cleanup warning:', err);
+        }
+      }
+    }
   };
 
   // ---------------- ADMIN CRUD ----------------
 
   const saveProduct = async (product: Product) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveProductToFirestore(product);
-    showToast(`Saved "${product.name}"`);
+    try {
+      await saveProductToFirestore(product);
+      await markCollectionBootstrapped(['products']);
+      showToast(`Saved "${product.name}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deleteProduct = async (productId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteProductFromFirestore(productId);
-    showToast('Product deleted');
+    const target = products.find((p) => p.id === productId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'products',
+        firestoreProducts,
+        INITIAL_PRODUCTS,
+        [productId],
+        saveProductToFirestore
+      );
+      await deleteProductFromFirestore(productId);
+
+      // Remove productId references from any homepage section in draft or published
+      const cleanSectionRefs = (list: WebsiteSection[]) =>
+        list.map((sec) =>
+          sec.productIds?.includes(productId)
+            ? { ...sec, productIds: sec.productIds.filter((id) => id !== productId) }
+            : sec
+        );
+
+      const draftHadRef = draftSections.some((s) => s.productIds?.includes(productId));
+      const nextDraftSecs = draftHadRef ? cleanSectionRefs(draftSections) : draftSections;
+      if (draftHadRef) {
+        setLocalDraftSections(nextDraftSecs);
+        await persistDraftSnapshot(draftSettings, nextDraftSecs, draftMenus);
+      }
+      if (publishedSnapshot?.sections?.some((s) => s.productIds?.includes(productId))) {
+        const nextPubSecs = cleanSectionRefs(publishedSnapshot.sections);
+        await saveWebsiteSnapshotToFirestore({
+          ...publishedSnapshot,
+          sections: nextPubSecs,
+        });
+      }
+      await Promise.all(
+        firestoreSections
+          .filter((s) => s.productIds?.includes(productId))
+          .map((s) =>
+            saveWebsiteSectionToFirestore({
+              ...s,
+              productIds: (s.productIds || []).filter((id) => id !== productId),
+            })
+          )
+      );
+
+      if (target?.images?.length) {
+        await cleanupUnreferencedStorageUrls(target.images, { kind: 'product', id: productId });
+      }
+      if (selectedProduct?.id === productId) {
+        setSelectedProduct(null);
+        if (activeView === 'product') setActiveView('shop');
+      }
+      showToast('Product permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveCategory = async (category: Category) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveCategoryToFirestore(category);
-    showToast(`Saved category "${category.name}"`);
+    try {
+      await saveCategoryToFirestore(category);
+      await markCollectionBootstrapped(['categories']);
+      showToast(`Saved category "${category.name}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deleteCategory = async (categoryId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteCategoryFromFirestore(categoryId);
-    showToast('Category deleted');
+    const target = categories.find((c) => c.id === categoryId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'categories',
+        firestoreCategories,
+        INITIAL_CATEGORIES,
+        [categoryId],
+        saveCategoryToFirestore
+      );
+      await deleteCategoryFromFirestore(categoryId);
+      if (target?.imageUrl) {
+        await cleanupUnreferencedStorageUrls([target.imageUrl], {
+          kind: 'category',
+          id: categoryId,
+        });
+      }
+      if (target && activeCategory === target.slug) {
+        setActiveCategory('all');
+      }
+      showToast('Category permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveBanner = async (banner: Banner) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveBannerToFirestore(banner);
-    showToast(`Saved banner "${banner.title}"`);
+    try {
+      await saveBannerToFirestore(banner);
+      await markCollectionBootstrapped(['banners']);
+      showToast(`Saved banner "${banner.title}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deleteBanner = async (bannerId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteBannerFromFirestore(bannerId);
-    showToast('Banner deleted');
+    const target = banners.find((b) => b.id === bannerId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'banners',
+        firestoreBanners,
+        INITIAL_BANNERS,
+        [bannerId],
+        saveBannerToFirestore
+      );
+      await deleteBannerFromFirestore(bannerId);
+      if (target?.imageUrl) {
+        await cleanupUnreferencedStorageUrls([target.imageUrl], {
+          kind: 'banner',
+          id: bannerId,
+        });
+      }
+      showToast('Banner permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveStoreSettings = async (settings: StoreSettings) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveStoreSettingsToFirestore(settings);
-    showToast('Store settings saved');
+    try {
+      await saveStoreSettingsToFirestore(settings);
+      showToast('Store settings saved');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveCmsPage = async (page: CmsPage) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveCmsPageToFirestore(page);
-    showToast(`Saved page "${page.title}"`);
+    try {
+      await saveCmsPageToFirestore(page);
+      await markCollectionBootstrapped(['cmsPages']);
+      showToast(`Saved page "${page.title}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deleteCmsPage = async (pageId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteCmsPageFromFirestore(pageId);
-    showToast('Page deleted');
+    const target = cmsPages.find((p) => p.id === pageId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'cmsPages',
+        firestorePages,
+        INITIAL_CMS_PAGES,
+        [pageId],
+        saveCmsPageToFirestore
+      );
+      await deleteCmsPageFromFirestore(pageId);
+      if (target?.featuredImage) {
+        await cleanupUnreferencedStorageUrls([target.featuredImage], {
+          kind: 'page',
+          id: pageId,
+        });
+      }
+      if (target && selectedPageSlug === target.slug) {
+        setSelectedPageSlug('');
+        if (activeView === 'page') setActiveView('home');
+      }
+      showToast('Custom page permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveCmsPost = async (post: CmsPost) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveCmsPostToFirestore(post);
-    showToast(`Saved post "${post.title}"`);
+    try {
+      await saveCmsPostToFirestore(post);
+      await markCollectionBootstrapped(['cmsPosts']);
+      showToast(`Saved post "${post.title}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deleteCmsPost = async (postId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteCmsPostFromFirestore(postId);
-    showToast('Post deleted');
+    const target = cmsPosts.find((p) => p.id === postId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'cmsPosts',
+        firestorePosts,
+        INITIAL_CMS_POSTS,
+        [postId],
+        saveCmsPostToFirestore
+      );
+      await deleteCmsPostFromFirestore(postId);
+      if (target) {
+        await cleanupUnreferencedStorageUrls(
+          [target.featuredImage, ...(target.galleryImages || [])],
+          { kind: 'post', id: postId }
+        );
+      }
+      if (target && selectedPostSlug === target.slug) {
+        setSelectedPostSlug('');
+        if (activeView === 'post') setActiveView('blog');
+      }
+      showToast('Blog post permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const savePromotion = async (promo: Promotion) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await savePromotionToFirestore(promo);
-    showToast(`Saved promo "${promo.code}"`);
+    try {
+      await savePromotionToFirestore(promo);
+      await markCollectionBootstrapped(['promotions']);
+      showToast(`Saved promo "${promo.code}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const deletePromotion = async (promoId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deletePromotionFromFirestore(promoId);
-    showToast('Promotion deleted');
+    try {
+      await prepareCollectionBeforeDelete(
+        'promotions',
+        firestorePromotions,
+        INITIAL_PROMOTIONS,
+        [promoId],
+        savePromotionToFirestore
+      );
+      await deletePromotionFromFirestore(promoId);
+      showToast('Promotion permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const saveMediaAsset = async (asset: MediaAsset) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await saveMediaAssetToFirestore(asset);
-    showToast(`Saved media "${asset.name}"`);
+    try {
+      await saveMediaAssetToFirestore(asset);
+      await markCollectionBootstrapped(['mediaAssets']);
+      showToast(`Saved media "${asset.name}"`);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
-  const deleteMediaAsset = async (assetId: string, storagePath?: string) => {
+  const deleteMediaAsset = async (assetId: string, storagePathOrUrl?: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteMediaAssetFromFirestore(assetId, storagePath);
-    showToast('Media asset removed');
+    const target = mediaAssets.find((a) => a.id === assetId);
+    const resolvedStorageTarget =
+      storagePathOrUrl ||
+      target?.storagePath ||
+      (target?.url && isFirebaseStorageUrl(target.url) ? target.url : undefined);
+    try {
+      await prepareCollectionBeforeDelete(
+        'mediaAssets',
+        firestoreMedia,
+        INITIAL_MEDIA_ASSETS,
+        [assetId],
+        saveMediaAssetToFirestore
+      );
+      await deleteMediaAssetFromFirestore(assetId, resolvedStorageTarget);
+      showToast('Media file permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const cleanupUnusedMediaAssets = async (assetsToDelete: MediaAsset[]): Promise<number> => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    const safeUnused = assetsToDelete.filter((a) => getMediaAssetUsages(a.url).length === 0);
+    if (safeUnused.length === 0) {
+      throw new Error('All selected files are currently referenced on your storefront.');
+    }
+    try {
+      await prepareCollectionBeforeDelete(
+        'mediaAssets',
+        firestoreMedia,
+        INITIAL_MEDIA_ASSETS,
+        safeUnused.map((a) => a.id),
+        saveMediaAssetToFirestore
+      );
+      let deletedCount = 0;
+      for (const asset of safeUnused) {
+        const storageTarget =
+          asset.storagePath || (isFirebaseStorageUrl(asset.url) ? asset.url : undefined);
+        await deleteMediaAssetFromFirestore(asset.id, storageTarget);
+        deletedCount += 1;
+      }
+      showToast(`Permanently deleted ${deletedCount} unused file(s)`);
+      return deletedCount;
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const deleteWebsiteSection = async (sectionId: string, syncLive = true) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    const target = draftSections.find((s) => s.id === sectionId);
+    try {
+      await prepareCollectionBeforeDelete(
+        'websiteSections',
+        firestoreSections,
+        INITIAL_WEBSITE_SECTIONS,
+        [sectionId],
+        saveWebsiteSectionToFirestore
+      );
+      const nextDraft = draftSections
+        .filter((s) => s.id !== sectionId)
+        .map((s, idx) => ({ ...s, displayOrder: idx + 1 }));
+
+      setLocalDraftSections(nextDraft);
+      await deleteWebsiteSectionFromFirestore(sectionId);
+      await persistDraftSnapshot(draftSettings, nextDraft, draftMenus);
+
+      if (syncLive && publishedSnapshot) {
+        const nextPub = (publishedSnapshot.sections || [])
+          .filter((s) => s.id !== sectionId)
+          .map((s, idx) => ({ ...s, displayOrder: idx + 1 }));
+        await saveWebsiteSnapshotToFirestore({
+          ...publishedSnapshot,
+          sections: nextPub,
+        });
+      }
+
+      if (target?.images?.length) {
+        await cleanupUnreferencedStorageUrls(target.images, {
+          kind: 'section',
+          id: sectionId,
+        });
+      }
+      showToast('Homepage section permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const deleteNavigationMenu = async (menuId: string, syncLive = true) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await prepareCollectionBeforeDelete(
+        'navigationMenus',
+        firestoreMenus,
+        INITIAL_NAVIGATION_MENUS,
+        [menuId],
+        saveNavigationMenuToFirestore
+      );
+      const nextMenus = draftMenus.filter((m) => m.id !== menuId);
+      setLocalDraftMenus(nextMenus);
+      await deleteNavigationMenuFromFirestore(menuId);
+      await persistDraftSnapshot(draftSettings, draftSections, nextMenus);
+
+      if (syncLive && publishedSnapshot) {
+        const nextPubMenus = (publishedSnapshot.menus || []).filter((m) => m.id !== menuId);
+        await saveWebsiteSnapshotToFirestore({
+          ...publishedSnapshot,
+          menus: nextPubMenus,
+        });
+      }
+      showToast('Navigation menu permanently deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const persistNavigationMenusLiveAndDraft = async (
+    nextMenus: NavigationMenu[],
+    syncLive = true
+  ) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await markCollectionBootstrapped(['navigationMenus']);
+      setLocalDraftMenus(nextMenus);
+      await persistDraftSnapshot(draftSettings, draftSections, nextMenus);
+      if (syncLive) {
+        await Promise.all(nextMenus.map((m) => saveNavigationMenuToFirestore(m)));
+        if (publishedSnapshot) {
+          await saveWebsiteSnapshotToFirestore({
+            ...publishedSnapshot,
+            menus: nextMenus,
+          });
+        }
+      }
+      showToast(syncLive ? 'Navigation updated live & in draft' : 'Navigation draft saved');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const subscribeNewsletter = async (email: string, source: 'footer' | 'section' = 'footer') => {
@@ -1493,12 +2037,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const removeNewsletterSubscriber = async (id: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
-    await deleteNewsletterSubscriberFromFirestore(id);
-    showToast('Subscriber removed');
+    try {
+      await deleteNewsletterSubscriberFromFirestore(id);
+      showToast('Subscriber permanently removed');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
   };
 
   const seedCatalogToFirestore = async () => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
+    const allKeys = [
+      'products',
+      'categories',
+      'banners',
+      'websiteSections',
+      'navigationMenus',
+      'cmsPages',
+      'cmsPosts',
+      'promotions',
+      'mediaAssets',
+    ];
+    const seededSettings: StoreSettings = {
+      ...DEFAULT_STORE_SETTINGS,
+      bootstrappedCollections: allKeys,
+    };
+    setLocalBootstrappedCols(allKeys);
     await Promise.all([
       ...INITIAL_CATEGORIES.map((c) => saveCategoryToFirestore(c)),
       ...INITIAL_PRODUCTS.map((p) => saveProductToFirestore(p)),
@@ -1509,11 +2075,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...INITIAL_CMS_POSTS.map((pt) => saveCmsPostToFirestore(pt)),
       ...INITIAL_PROMOTIONS.map((pr) => savePromotionToFirestore(pr)),
       ...INITIAL_MEDIA_ASSETS.map((ma) => saveMediaAssetToFirestore(ma)),
-      saveStoreSettingsToFirestore(DEFAULT_STORE_SETTINGS),
+      saveStoreSettingsToFirestore(seededSettings),
       saveWebsiteSnapshotToFirestore({
         id: 'published',
         versionLabel: 'Initial VEYRA Release',
-        settings: DEFAULT_STORE_SETTINGS,
+        settings: seededSettings,
         sections: INITIAL_WEBSITE_SECTIONS,
         menus: INITIAL_NAVIGATION_MENUS,
         publishedBy: currentUser?.email || '',
@@ -1522,7 +2088,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       saveWebsiteSnapshotToFirestore({
         id: 'draft',
         versionLabel: 'Current Admin Draft',
-        settings: DEFAULT_STORE_SETTINGS,
+        settings: seededSettings,
         sections: INITIAL_WEBSITE_SECTIONS,
         menus: INITIAL_NAVIGATION_MENUS,
         publishedBy: currentUser?.email || '',
@@ -1615,6 +2181,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         placeOrder,
         lookupOrder,
         updateOrder,
+        deleteOrder,
+        deleteOrdersBulk,
 
         saveProduct,
         deleteProduct,
@@ -1631,6 +2199,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deletePromotion,
         saveMediaAsset,
         deleteMediaAsset,
+        cleanupUnusedMediaAssets,
+        getMediaAssetUsages,
+        deleteWebsiteSection,
+        deleteNavigationMenu,
+        persistNavigationMenusLiveAndDraft,
         subscribeNewsletter,
         removeNewsletterSubscriber,
         seedCatalogToFirestore,

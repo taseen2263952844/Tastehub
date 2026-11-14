@@ -16,6 +16,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { WebsiteSection, WebsiteSectionType, SectionItemEntry } from '../../types';
 import { MediaPickerModal } from './MediaPickerModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 const SECTION_CATALOG: { type: WebsiteSectionType; label: string; desc: string }[] = [
   { type: 'hero_banner', label: 'Hero Banner', desc: 'Full-width editorial focal banner & CTA' },
@@ -38,7 +39,14 @@ const SECTION_CATALOG: { type: WebsiteSectionType; label: string; desc: string }
 ];
 
 export const HomepageBuilderPanel: React.FC = () => {
-  const { draftSections, updateDraftSections, products, categories, showToast } = useApp();
+  const {
+    draftSections,
+    updateDraftSections,
+    deleteWebsiteSection,
+    products,
+    categories,
+    showToast,
+  } = useApp();
   const [sections, setSections] = useState<WebsiteSection[]>(draftSections);
   const [selectedId, setSelectedId] = useState<string>(draftSections[0]?.id || '');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -46,6 +54,7 @@ export const HomepageBuilderPanel: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [urlToAdd, setUrlToAdd] = useState('');
+  const [pendingDeleteSection, setPendingDeleteSection] = useState<WebsiteSection | null>(null);
 
   useEffect(() => {
     setSections(draftSections);
@@ -143,15 +152,12 @@ export const HomepageBuilderPanel: React.FC = () => {
     showToast('Section duplicated');
   };
 
-  const handleDelete = async (id: string) => {
+  const requestDeleteSection = (sec: WebsiteSection) => {
     if (sections.length <= 1) {
       showToast('Keep at least one homepage section.');
       return;
     }
-    const next = sections.filter((s) => s.id !== id);
-    if (selectedId === id && next[0]) setSelectedId(next[0].id);
-    await persistOrder(next);
-    showToast('Section removed from draft');
+    setPendingDeleteSection(sec);
   };
 
   const moveSection = async (fromIdx: number, toIdx: number) => {
@@ -327,7 +333,7 @@ export const HomepageBuilderPanel: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDelete(sec.id)}
+                      onClick={() => requestDeleteSection(sec)}
                       className="p-1 rounded hover:bg-white text-[#5C655F] hover:text-red-700"
                       aria-label="Delete section"
                     >
@@ -808,6 +814,24 @@ export const HomepageBuilderPanel: React.FC = () => {
         onSelect={(url) => {
           if (selected) {
             updateSelectedField({ images: [...selected.images, url] });
+          }
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDeleteSection)}
+        onClose={() => setPendingDeleteSection(null)}
+        title="Delete Homepage Section?"
+        itemLabel={pendingDeleteSection?.name || pendingDeleteSection?.heading || ''}
+        description="This permanently removes the section from Cloud Firestore, your Admin Draft, and your live public storefront, and cleans up any unreferenced uploaded section images."
+        onConfirm={async () => {
+          if (!pendingDeleteSection) return;
+          const targetId = pendingDeleteSection.id;
+          await deleteWebsiteSection(targetId, true);
+          const remaining = sections.filter((s) => s.id !== targetId);
+          setSections(remaining);
+          if (selectedId === targetId && remaining[0]) {
+            setSelectedId(remaining[0].id);
           }
         }}
       />

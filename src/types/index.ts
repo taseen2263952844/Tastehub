@@ -227,6 +227,8 @@ export interface StoreSettings {
   ogImageUrl?: string;
   robotsAllowIndex?: boolean;
   robotsCustomText?: string;
+  // Internal Firestore bootstrap tracking
+  bootstrappedCollections?: string[];
 }
 
 // ---------------- VISUAL HOMEPAGE BUILDER ----------------
