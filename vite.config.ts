@@ -43,37 +43,52 @@ async function sendWebResponse(webRes: Response, res: ServerResponse): Promise<v
 }
 
 function resellHatDevProxyPlugin(proxyEnv: ProxyEnv): Plugin {
+  const attachProxyMiddleware = (middlewares: {
+    use: (
+      route: string,
+      handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void | Promise<void>
+    ) => void;
+  }) => {
+    middlewares.use('/api/suppliers/resellhat', async (req, res, next) => {
+      const pathOnly = (req.url || '').split('?')[0];
+      if (pathOnly !== '/test' && pathOnly !== '/products') {
+        return next();
+      }
+      try {
+        req.url = `/api/suppliers/resellhat${req.url || ''}`;
+        const webReq = await nodeToWebRequest(req);
+        const runtimeEnv: ProxyEnv = {
+          ...proxyEnv,
+          ...process.env,
+        };
+        const webRes =
+          pathOnly === '/test'
+            ? await handleResellHatTestConnection(webReq, runtimeEnv)
+            : await handleResellHatProducts(webReq, runtimeEnv);
+        await sendWebResponse(webRes, res);
+      } catch (err) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(
+          JSON.stringify({
+            success: false,
+            ok: false,
+            status: 500,
+            message: err instanceof Error ? err.message : 'Internal proxy error',
+            data: null,
+          })
+        );
+      }
+    });
+  };
+
   return {
     name: 'resellhat-server-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/suppliers/resellhat', async (req, res, next) => {
-        const pathOnly = (req.url || '').split('?')[0];
-        if (pathOnly !== '/test' && pathOnly !== '/products') {
-          return next();
-        }
-        try {
-          req.url = `/api/suppliers/resellhat${req.url || ''}`;
-          const webReq = await nodeToWebRequest(req);
-          const runtimeEnv: ProxyEnv = {
-            ...proxyEnv,
-            ...process.env,
-          };
-          const webRes =
-            pathOnly === '/test'
-              ? await handleResellHatTestConnection(webReq, runtimeEnv)
-              : await handleResellHatProducts(webReq, runtimeEnv);
-          await sendWebResponse(webRes, res);
-        } catch (err) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(
-            JSON.stringify({
-              ok: false,
-              message: err instanceof Error ? err.message : 'Internal proxy error',
-            })
-          );
-        }
-      });
+      attachProxyMiddleware(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      attachProxyMiddleware(server.middlewares);
     },
   };
 }

@@ -50,9 +50,22 @@ export function corsPreflightResponse(): Response {
   });
 }
 
-export function jsonResponse(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
+export function jsonResponse(body: Record<string, unknown>, httpStatus = 200): Response {
+  const success =
+    typeof body.success === 'boolean'
+      ? body.success
+      : typeof body.ok === 'boolean'
+      ? body.ok
+      : httpStatus >= 200 && httpStatus < 300;
+  const normalizedBody: Record<string, unknown> = {
+    success,
+    status: typeof body.status === 'number' ? body.status : httpStatus,
+    message: typeof body.message === 'string' ? body.message : '',
+    data: body.data !== undefined ? body.data : null,
+    ...body,
+  };
+  return new Response(JSON.stringify(normalizedBody), {
+    status: httpStatus,
     headers: {
       ...CORS_HEADERS,
       'Content-Type': 'application/json; charset=utf-8',
@@ -385,6 +398,7 @@ async function fetchResellHatUpstream(
 ): Promise<
   | {
       ok: true;
+      upstreamStatus: number;
       payload: ResellHatProductsProxyResult;
       latencyMs: number;
     }
@@ -415,17 +429,42 @@ async function fetchResellHatUpstream(
     });
     clearTimeout(timer);
     const latencyMs = Date.now() - startedAt;
+    const rawText = await res.text();
+
+    let parsedJson: unknown = null;
+    try {
+      parsedJson = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      parsedJson = null;
+    }
+
+    const parsedObj =
+      parsedJson && typeof parsedJson === 'object' && !Array.isArray(parsedJson)
+        ? (parsedJson as Record<string, unknown>)
+        : null;
+
+    const safeUpstreamDetail =
+      parsedObj && typeof (parsedObj.message ?? parsedObj.error) === 'string'
+        ? String(parsedObj.message ?? parsedObj.error)
+            .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+            .slice(0, 180)
+        : '';
 
     if (res.status === 401 || res.status === 403) {
       return {
         ok: false,
         response: jsonResponse(
           {
+            success: false,
             ok: false,
             connected: false,
-            code: 'UPSTREAM_AUTH_FAILED',
+            status: res.status,
             upstreamStatus: res.status,
-            message: `ResellHat rejected the server API key (Supplier HTTP ${res.status}). Verify RESSELLHAT_API_KEY in Cloudflare Pages environment secrets.`,
+            code: 'UPSTREAM_AUTH_FAILED',
+            message: `ResellHat rejected the server API key (Supplier HTTP ${res.status})${
+              safeUpstreamDetail ? `: ${safeUpstreamDetail}` : ''
+            }. Verify RESSELLHAT_API_KEY in Cloudflare Pages environment secrets.`,
+            data: null,
           },
           502
         ),
@@ -437,12 +476,15 @@ async function fetchResellHatUpstream(
         ok: false,
         response: jsonResponse(
           {
+            success: false,
             ok: false,
             connected: false,
-            code: 'RATE_LIMITED',
+            status: res.status,
             upstreamStatus: res.status,
+            code: 'RATE_LIMITED',
             message:
               'ResellHat API rate limit reached (Supplier HTTP 429). Please pause briefly and try again.',
+            data: null,
           },
           429
         ),
@@ -454,39 +496,90 @@ async function fetchResellHatUpstream(
         ok: false,
         response: jsonResponse(
           {
+            success: false,
             ok: false,
             connected: false,
-            code: 'UPSTREAM_HTTP_ERROR',
+            status: res.status,
             upstreamStatus: res.status,
-            message: `ResellHat API returned HTTP ${res.status}.`,
+            code: 'UPSTREAM_HTTP_ERROR',
+            message: `ResellHat API returned HTTP ${res.status}${
+              safeUpstreamDetail ? `: ${safeUpstreamDetail}` : '.'
+            }`,
+            data: null,
           },
           502
         ),
       };
     }
 
-    const rawJson = (await res.json()) as Record<string, unknown>;
-    const rawArray = Array.isArray(rawJson?.data)
-      ? rawJson.data
-      : Array.isArray(rawJson)
-      ? rawJson
-      : null;
-
-    if (!rawArray) {
+    if (!parsedObj) {
       return {
         ok: false,
         response: jsonResponse(
           {
+            success: false,
             ok: false,
-            code: 'INVALID_UPSTREAM_PAYLOAD',
-            message: 'ResellHat response did not contain a valid "data" product array.',
+            connected: false,
+            status: res.status,
+            upstreamStatus: res.status,
+            code: 'INVALID_UPSTREAM_JSON',
+            message: `ResellHat returned HTTP ${res.status} with non-JSON content instead of the expected JSON response.`,
+            data: null,
           },
           502
         ),
       };
     }
 
-    const normalized = rawArray
+    if (!Array.isArray(parsedObj.data)) {
+      return {
+        ok: false,
+        response: jsonResponse(
+          {
+            success: false,
+            ok: false,
+            connected: false,
+            status: res.status,
+            upstreamStatus: res.status,
+            code: 'INVALID_UPSTREAM_PAYLOAD',
+            message: `ResellHat returned HTTP ${res.status}, but the JSON response did not contain a valid "data" array.`,
+            data: null,
+          },
+          502
+        ),
+      };
+    }
+
+    const rawMeta =
+      parsedObj.meta && typeof parsedObj.meta === 'object' && !Array.isArray(parsedObj.meta)
+        ? (parsedObj.meta as Record<string, unknown>)
+        : null;
+
+    if (
+      !rawMeta ||
+      rawMeta.last_page === undefined ||
+      rawMeta.last_page === null ||
+      !Number.isFinite(Number(rawMeta.last_page))
+    ) {
+      return {
+        ok: false,
+        response: jsonResponse(
+          {
+            success: false,
+            ok: false,
+            connected: false,
+            status: res.status,
+            upstreamStatus: res.status,
+            code: 'INVALID_UPSTREAM_PAYLOAD',
+            message: `ResellHat returned HTTP ${res.status} with a "data" array, but was missing the expected "meta.last_page" field.`,
+            data: null,
+          },
+          502
+        ),
+      };
+    }
+
+    const normalized = parsedObj.data
       .map(normalizeResellHatProduct)
       .filter((p): p is NormalizedSupplierProduct => p !== null);
 
@@ -496,8 +589,8 @@ async function fetchResellHatUpstream(
         categorySet.add(p.category);
       }
     });
-    if (Array.isArray(rawJson?.categories)) {
-      rawJson.categories.forEach((c) => {
+    if (Array.isArray(parsedObj.categories)) {
+      parsedObj.categories.forEach((c) => {
         if (typeof c === 'string' && c.trim()) categorySet.add(c.trim());
         else if (
           c &&
@@ -509,10 +602,6 @@ async function fetchResellHatUpstream(
       });
     }
 
-    const rawMeta = (rawJson?.meta && typeof rawJson.meta === 'object'
-      ? rawJson.meta
-      : {}) as Record<string, unknown>;
-
     const currentPage = Math.max(1, Number(rawMeta.current_page || params.page) || 1);
     const lastPage = Math.max(currentPage, Number(rawMeta.last_page || 1) || 1);
     const total = Math.max(normalized.length, Number(rawMeta.total || normalized.length) || 0);
@@ -523,6 +612,7 @@ async function fetchResellHatUpstream(
 
     return {
       ok: true,
+      upstreamStatus: res.status,
       latencyMs,
       payload: {
         ok: true,
@@ -544,11 +634,15 @@ async function fetchResellHatUpstream(
       ok: false,
       response: jsonResponse(
         {
+          success: false,
           ok: false,
+          connected: false,
+          status: isAbort ? 504 : 502,
           code: isAbort ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_NETWORK_ERROR',
           message: isAbort
             ? 'ResellHat API timed out after 20 seconds.'
             : 'Unable to reach ResellHat API from server proxy.',
+          data: null,
         },
         isAbort ? 504 : 502
       ),
@@ -592,16 +686,23 @@ export async function handleResellHatTestConnection(
   if (!probe.ok) return probe.response;
 
   return jsonResponse({
+    success: true,
     ok: true,
     connected: true,
-    upstreamStatus: 200,
+    status: probe.upstreamStatus,
+    upstreamStatus: probe.upstreamStatus,
     supplier: 'ResellHat',
     latencyMs: probe.latencyMs,
     totalProducts: probe.payload.meta.total,
     lastPage: probe.payload.meta.last_page,
     testedBy: authCheck.user.email,
     testedAt: new Date().toISOString(),
-    message: `Connected cleanly to ResellHat API (${probe.latencyMs}ms).`,
+    message: `Connected cleanly to ResellHat API (HTTP ${probe.upstreamStatus}, ${probe.latencyMs}ms).`,
+    data: {
+      data: probe.payload.data,
+      meta: probe.payload.meta,
+      categories: probe.payload.categories,
+    },
   });
 }
 
@@ -615,7 +716,14 @@ export async function handleResellHatProducts(
 
   if (request.method !== 'GET') {
     return jsonResponse(
-      { ok: false, code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed. Use GET.' },
+      {
+        success: false,
+        ok: false,
+        status: 405,
+        code: 'METHOD_NOT_ALLOWED',
+        message: 'Method not allowed. Use GET.',
+        data: null,
+      },
       405
     );
   }
@@ -627,10 +735,13 @@ export async function handleResellHatProducts(
   if (!apiKey) {
     return jsonResponse(
       {
+        success: false,
         ok: false,
+        status: 503,
         code: 'MISSING_API_KEY',
         message:
           'Server secret RESSELLHAT_API_KEY is not configured. Set RESSELLHAT_API_KEY in Cloudflare Pages → Settings → Environment variables.',
+        data: null,
       },
       503
     );
@@ -656,7 +767,10 @@ export async function handleResellHatProducts(
 
   return jsonResponse({
     ...result.payload,
-    upstreamStatus: 200,
+    success: true,
+    status: result.upstreamStatus,
+    upstreamStatus: result.upstreamStatus,
+    message: `Loaded ${result.payload.data.length} product(s) from ResellHat.`,
     latencyMs: result.latencyMs,
   });
 }

@@ -16,8 +16,10 @@ export interface ResellHatProductItem {
 }
 
 export interface ResellHatTestResponse {
-  ok: boolean;
+  success: boolean;
+  ok?: boolean;
   connected?: boolean;
+  status: number;
   upstreamStatus?: number;
   supplier?: string;
   latencyMs?: number;
@@ -27,10 +29,22 @@ export interface ResellHatTestResponse {
   testedAt?: string;
   code?: string;
   message: string;
+  data?: {
+    data: ResellHatProductItem[];
+    meta: {
+      current_page: number;
+      last_page: number;
+      per_page: number;
+      total: number;
+    };
+    categories?: string[];
+  } | null;
 }
 
 export interface ResellHatProductsResponse {
+  success?: boolean;
   ok: boolean;
+  status?: number;
   upstreamStatus?: number;
   supplier?: string;
   data: ResellHatProductItem[];
@@ -57,33 +71,82 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   };
 }
 
+async function parseProxyJsonResponse<T>(
+  res: Response,
+  endpointLabel: string
+): Promise<T> {
+  const rawText = await res.text();
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  let parsed: unknown = null;
+  try {
+    parsed = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const trimmed = rawText.trimStart();
+    if (res.status === 405) {
+      throw new Error(
+        `Server proxy rejected the request method (HTTP 405) at ${endpointLabel}. Ensure Cloudflare Pages Functions are deployed.`
+      );
+    }
+    if (trimmed.startsWith('<') || contentType.includes('text/html')) {
+      throw new Error(
+        `Proxy route ${endpointLabel} returned HTML instead of JSON (HTTP ${res.status}). The server Function is not active on this host or deployment (SPA index.html fallback was served).`
+      );
+    }
+    throw new Error(
+      `Invalid non-JSON response from server proxy (HTTP ${res.status}): ${
+        trimmed.slice(0, 120) || 'empty response body'
+      }`
+    );
+  }
+
+  return parsed as T;
+}
+
 export async function testResellHatConnection(): Promise<ResellHatTestResponse> {
   const headers = await getAuthHeaders();
   const res = await fetch('/api/suppliers/resellhat/test', {
     method: 'GET',
     headers,
   });
-  const json = (await res.json().catch(() => null)) as ResellHatTestResponse | null;
-  if (!json) {
-    throw new Error(
-      res.status === 405
-        ? 'Server proxy rejected the request method (HTTP 405). Ensure Cloudflare Pages Functions are deployed for /api/suppliers/resellhat/test.'
-        : `Unexpected response from server proxy (HTTP ${res.status}).`
-    );
-  }
-  if (!res.ok || !json.ok) {
+
+  const json = await parseProxyJsonResponse<ResellHatTestResponse>(
+    res,
+    '/api/suppliers/resellhat/test'
+  );
+
+  const upstreamStatus = typeof json.status === 'number' ? json.status : json.upstreamStatus;
+  const isExplicitSuccess =
+    json.success === true && json.ok !== false && json.connected !== false;
+  const supplierData = json.data;
+  const hasValidSupplierData =
+    supplierData !== null &&
+    supplierData !== undefined &&
+    typeof supplierData === 'object' &&
+    Array.isArray(supplierData.data) &&
+    typeof supplierData.meta?.last_page === 'number';
+
+  if (!res.ok || !isExplicitSuccess || !hasValidSupplierData) {
+    const reportedStatus = upstreamStatus ?? res.status;
     const statusHint =
-      json.upstreamStatus && !String(json.message || '').includes(String(json.upstreamStatus))
-        ? ` (Supplier HTTP ${json.upstreamStatus})`
+      reportedStatus && !String(json.message || '').includes(String(reportedStatus))
+        ? ` (HTTP ${reportedStatus})`
         : '';
-    const err = new Error(
-      `${json.message || `Connection test failed (HTTP ${res.status}).`}${statusHint}`
-    );
+    const fallbackMessage =
+      res.ok && isExplicitSuccess && !hasValidSupplierData
+        ? 'Proxy returned HTTP 200, but did not confirm a valid ResellHat data array and meta.last_page field.'
+        : `Connection test failed (HTTP ${reportedStatus}).`;
+
+    const err = new Error(`${json.message || fallbackMessage}${statusHint}`);
     (err as Error & { code?: string; upstreamStatus?: number }).code = json.code;
-    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus =
-      json.upstreamStatus;
+    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus = reportedStatus;
     throw err;
   }
+
   return json;
 }
 
@@ -105,21 +168,24 @@ export async function fetchResellHatProductsPage(params: {
     headers,
   });
 
-  const json = (await res.json().catch(() => null)) as ResellHatProductsResponse | null;
-  if (!json) {
-    throw new Error(`Unexpected response from supplier proxy (HTTP ${res.status}).`);
-  }
-  if (!res.ok || !json.ok) {
+  const json = await parseProxyJsonResponse<ResellHatProductsResponse>(
+    res,
+    '/api/suppliers/resellhat/products'
+  );
+
+  const reportedStatus = typeof json.status === 'number' ? json.status : json.upstreamStatus;
+  const isSuccess = json.success !== false && json.ok !== false && Array.isArray(json.data);
+
+  if (!res.ok || !isSuccess) {
     const statusHint =
-      json.upstreamStatus && !String(json.message || '').includes(String(json.upstreamStatus))
-        ? ` (Supplier HTTP ${json.upstreamStatus})`
+      reportedStatus && !String(json.message || '').includes(String(reportedStatus))
+        ? ` (Supplier HTTP ${reportedStatus})`
         : '';
     const err = new Error(
-      `${json.message || `Failed to load ResellHat products (HTTP ${res.status}).`}${statusHint}`
+      `${json.message || `Failed to load ResellHat products (HTTP ${reportedStatus ?? res.status}).`}${statusHint}`
     );
     (err as Error & { code?: string; upstreamStatus?: number }).code = json.code;
-    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus =
-      json.upstreamStatus;
+    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus = reportedStatus;
     throw err;
   }
   return json;
