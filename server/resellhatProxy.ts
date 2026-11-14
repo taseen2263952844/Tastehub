@@ -1,6 +1,9 @@
-import firebaseAppletConfig from '../firebase-applet-config.json';
-
 export type ProxyEnv = Record<string, string | undefined>;
+
+const DEFAULT_FIREBASE_WEB_API_KEY = 'AIzaSyA3Gj_VVly7_6DToQlXkLofmN_bKH8SDk4';
+const DEFAULT_FIREBASE_PROJECT_ID = 'tastehub-16c49';
+const DEFAULT_FIREBASE_DATABASE_ID =
+  'ai-studio-tastehubrestaura-3695d266-0af0-4fbc-92e0-8a7cb0eea600';
 
 export interface NormalizedSupplierProduct {
   supplierProductId: string;
@@ -129,13 +132,9 @@ export async function verifyAdminRequest(
     };
   }
 
-  const apiKey = (env.FIREBASE_WEB_API_KEY || firebaseAppletConfig.apiKey || '').trim();
-  const projectId = (env.FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || '').trim();
-  const databaseId = (
-    env.FIREBASE_DATABASE_ID ||
-    firebaseAppletConfig.firestoreDatabaseId ||
-    '(default)'
-  ).trim();
+  const apiKey = (env.FIREBASE_WEB_API_KEY || DEFAULT_FIREBASE_WEB_API_KEY).trim();
+  const projectId = (env.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID).trim();
+  const databaseId = (env.FIREBASE_DATABASE_ID || DEFAULT_FIREBASE_DATABASE_ID).trim();
 
   if (!apiKey || !projectId) {
     return {
