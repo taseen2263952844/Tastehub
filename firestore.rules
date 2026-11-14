@@ -42,7 +42,10 @@ service cloud.firestore {
           'id', 'name', 'slug', 'categoryId', 'categoryName', 'price', 'compareAtPrice',
           'shortDescription', 'description', 'images', 'stock', 'sku', 'variations',
           'isFeatured', 'isNewArrival', 'isBestSeller', 'popularityScore', 'isActive',
-          'tags', 'seoTitle', 'seoDescription', 'createdAt', 'updatedAt'
+          'tags', 'seoTitle', 'seoDescription',
+          'supplierName', 'supplierProductId', 'supplierPrice', 'supplierStock',
+          'supplierLastSyncedAt', 'supplierCategory', 'supplierMarkupType', 'supplierMarkupValue',
+          'createdAt', 'updatedAt'
         ]) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
         data.categoryId is string && data.categoryId.size() <= 64 &&
@@ -56,7 +59,15 @@ service cloud.firestore {
         (!('variations' in data) || (data.variations is list && data.variations.size() <= 30)) &&
         (!('tags' in data) || (data.tags is list && data.tags.size() <= 20)) &&
         (!('seoTitle' in data) || (data.seoTitle is string && data.seoTitle.size() <= 160)) &&
-        (!('seoDescription' in data) || (data.seoDescription is string && data.seoDescription.size() <= 320));
+        (!('seoDescription' in data) || (data.seoDescription is string && data.seoDescription.size() <= 320)) &&
+        (!('supplierName' in data) || (data.supplierName is string && data.supplierName.size() <= 60)) &&
+        (!('supplierProductId' in data) || (data.supplierProductId is string && data.supplierProductId.size() <= 120)) &&
+        (!('supplierPrice' in data) || (data.supplierPrice is number && data.supplierPrice >= 0 && data.supplierPrice <= 1000000)) &&
+        (!('supplierStock' in data) || (data.supplierStock is number && data.supplierStock >= 0 && data.supplierStock <= 100000)) &&
+        (!('supplierLastSyncedAt' in data) || (data.supplierLastSyncedAt is string && data.supplierLastSyncedAt.size() <= 64)) &&
+        (!('supplierCategory' in data) || (data.supplierCategory is string && data.supplierCategory.size() <= 100)) &&
+        (!('supplierMarkupType' in data) || (data.supplierMarkupType in ['percentage', 'fixed', 'custom'])) &&
+        (!('supplierMarkupValue' in data) || (data.supplierMarkupValue is number && data.supplierMarkupValue >= 0 && data.supplierMarkupValue <= 1000000));
     }
 
     // Validation for Category documents
@@ -204,6 +215,49 @@ service cloud.firestore {
         data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$') &&
         data.source in ['footer', 'section'] &&
         data.status in ['subscribed', 'unsubscribed'];
+    }
+
+    // Validation for SupplierIntegration documents (no secrets allowed)
+    function isValidSupplierIntegration(data) {
+      return data.keys().hasAll(['id', 'supplierName', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'supplierName', 'status', 'lastTestedAt', 'lastSyncedAt', 'lastError',
+          'defaultMarkupType', 'defaultMarkupValue', 'defaultCategoryId',
+          'defaultPublishStatus', 'importedCount', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.supplierName is string && data.supplierName.size() >= 1 && data.supplierName.size() <= 60 &&
+        data.status in ['connected', 'unconfigured', 'error'] &&
+        (!('lastTestedAt' in data) || (data.lastTestedAt is string && data.lastTestedAt.size() <= 64)) &&
+        (!('lastSyncedAt' in data) || (data.lastSyncedAt is string && data.lastSyncedAt.size() <= 64)) &&
+        (!('lastError' in data) || (data.lastError is string && data.lastError.size() <= 500)) &&
+        (!('defaultMarkupType' in data) || (data.defaultMarkupType in ['percentage', 'fixed', 'custom'])) &&
+        (!('defaultMarkupValue' in data) || (data.defaultMarkupValue is number && data.defaultMarkupValue >= 0 && data.defaultMarkupValue <= 1000000)) &&
+        (!('defaultCategoryId' in data) || (data.defaultCategoryId is string && data.defaultCategoryId.size() <= 64)) &&
+        (!('defaultPublishStatus' in data) || (data.defaultPublishStatus in ['draft', 'published'])) &&
+        (!('importedCount' in data) || (data.importedCount is number && data.importedCount >= 0 && data.importedCount <= 1000000));
+    }
+
+    // Validation for SupplierImportLog documents
+    function isValidSupplierImportLog(data) {
+      return data.keys().hasAll(['id', 'supplierName', 'mode', 'totalProcessed', 'createdCount', 'updatedCount', 'skippedCount', 'failedCount', 'triggeredBy', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'supplierName', 'mode', 'categoryFilter', 'totalProcessed',
+          'createdCount', 'updatedCount', 'skippedCount', 'failedCount',
+          'errors', 'triggeredBy', 'createdAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 80 &&
+        data.supplierName is string && data.supplierName.size() >= 1 && data.supplierName.size() <= 60 &&
+        data.mode in ['selected', 'category', 'sync'] &&
+        (!('categoryFilter' in data) || (data.categoryFilter is string && data.categoryFilter.size() <= 100)) &&
+        data.totalProcessed is number && data.totalProcessed >= 0 && data.totalProcessed <= 100000 &&
+        data.createdCount is number && data.createdCount >= 0 && data.createdCount <= 100000 &&
+        data.updatedCount is number && data.updatedCount >= 0 && data.updatedCount <= 100000 &&
+        data.skippedCount is number && data.skippedCount >= 0 && data.skippedCount <= 100000 &&
+        data.failedCount is number && data.failedCount >= 0 && data.failedCount <= 100000 &&
+        (!('errors' in data) || (data.errors is list && data.errors.size() <= 25 && (data.errors.size() == 0 || (data.errors[0] is string && data.errors[0].size() <= 300)))) &&
+        data.triggeredBy is string && data.triggeredBy.size() <= 120 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
     }
 
     // Validation for UserProfile documents
@@ -385,6 +439,22 @@ service cloud.firestore {
         allow read, delete: if isAdmin();
         allow write: if false;
       }
+    }
+
+    // --- SUPPLIER INTEGRATIONS (ADMIN ONLY, NO SECRETS) ---
+    match /supplierIntegrations/{integrationId} {
+      allow get: if isAdmin() && isValidId(integrationId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(integrationId) && isValidSupplierIntegration(incoming());
+      allow delete: if isAdmin() && isValidId(integrationId);
+    }
+
+    // --- SUPPLIER IMPORT LOGS (ADMIN ONLY) ---
+    match /supplierImportLogs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(logId) && isValidSupplierImportLog(incoming());
+      allow delete: if isAdmin() && isValidId(logId);
     }
 
     // --- ADMINS COLLECTION ---

@@ -19,6 +19,7 @@ export type AdminSectionTab =
   | 'orders'
   | 'products'
   | 'categories'
+  | 'suppliers'
   | 'homepage'
   | 'customizer'
   | 'navigation'

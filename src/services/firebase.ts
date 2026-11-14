@@ -56,6 +56,8 @@ import {
   Promotion,
   MediaAsset,
   NewsletterSubscriber,
+  SupplierIntegrationConfig,
+  SupplierImportLog,
 } from '../types';
 import rawConfig from '../../firebase-applet-config.json';
 
@@ -305,42 +307,105 @@ export function subscribeToProductsFirestore(
   );
 }
 
+function buildProductFirestorePayload(product: Product): Record<string, any> {
+  const safeName = (product.name || 'Untitled Product').trim().slice(0, 140);
+  const safePrice = Math.min(1000000, Math.max(0, Math.round(Number(product.price) || 0)));
+  const safeStock = Math.min(100000, Math.max(0, Math.floor(Number(product.stock) || 0)));
+
+  const payload: Record<string, any> = {
+    id: product.id,
+    name: safeName.length >= 2 ? safeName : `${safeName} Product`,
+    slug: (product.slug || product.id).slice(0, 140),
+    categoryId: (product.categoryId || 'electronics-gadgets').slice(0, 64),
+    categoryName: (product.categoryName || 'Electronics & Gadgets').slice(0, 80),
+    price: safePrice,
+    shortDescription: (product.shortDescription || '').slice(0, 350),
+    description: (product.description || safeName).slice(0, 4000),
+    images: (product.images || []).slice(0, 12),
+    stock: safeStock,
+    sku: (product.sku || '').slice(0, 64),
+    variations: (product.variations || []).slice(0, 30),
+    isFeatured: Boolean(product.isFeatured),
+    isNewArrival: Boolean(product.isNewArrival),
+    isBestSeller: Boolean(product.isBestSeller),
+    popularityScore: Number(product.popularityScore || 50),
+    isActive: Boolean(product.isActive),
+    tags: (product.tags || []).slice(0, 20),
+    seoTitle: (product.seoTitle || '').slice(0, 160),
+    seoDescription: (product.seoDescription || '').slice(0, 320),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (product.compareAtPrice && product.compareAtPrice > 0) {
+    payload.compareAtPrice = Math.min(1000000, Math.max(0, Math.round(Number(product.compareAtPrice))));
+  }
+  if (!product.createdAt) {
+    payload.createdAt = serverTimestamp();
+  }
+  if (product.supplierName) {
+    payload.supplierName = product.supplierName.slice(0, 60);
+  }
+  if (product.supplierProductId) {
+    payload.supplierProductId = product.supplierProductId.slice(0, 120);
+  }
+  if (product.supplierPrice !== undefined && Number.isFinite(Number(product.supplierPrice))) {
+    payload.supplierPrice = Math.min(1000000, Math.max(0, Math.round(Number(product.supplierPrice))));
+  }
+  if (product.supplierStock !== undefined && Number.isFinite(Number(product.supplierStock))) {
+    payload.supplierStock = Math.min(100000, Math.max(0, Math.floor(Number(product.supplierStock))));
+  }
+  if (product.supplierLastSyncedAt) {
+    payload.supplierLastSyncedAt = product.supplierLastSyncedAt.slice(0, 64);
+  }
+  if (product.supplierCategory) {
+    payload.supplierCategory = product.supplierCategory.slice(0, 100);
+  }
+  if (product.supplierMarkupType) {
+    payload.supplierMarkupType = product.supplierMarkupType;
+  }
+  if (
+    product.supplierMarkupValue !== undefined &&
+    Number.isFinite(Number(product.supplierMarkupValue))
+  ) {
+    payload.supplierMarkupValue = Math.min(
+      1000000,
+      Math.max(0, Number(product.supplierMarkupValue))
+    );
+  }
+  return payload;
+}
+
 export async function saveProductToFirestore(product: Product): Promise<void> {
   if (!db) return;
   const docPath = `products/${product.id}`;
   try {
-    const payload: Record<string, any> = {
-      id: product.id,
-      name: product.name,
-      slug: product.slug,
-      categoryId: product.categoryId,
-      categoryName: product.categoryName,
-      price: Number(product.price),
-      shortDescription: product.shortDescription || '',
-      description: product.description,
-      images: product.images || [],
-      stock: Number(product.stock),
-      sku: product.sku || '',
-      variations: product.variations || [],
-      isFeatured: Boolean(product.isFeatured),
-      isNewArrival: Boolean(product.isNewArrival),
-      isBestSeller: Boolean(product.isBestSeller),
-      popularityScore: Number(product.popularityScore || 50),
-      isActive: Boolean(product.isActive),
-      tags: product.tags || [],
-      seoTitle: product.seoTitle || '',
-      seoDescription: product.seoDescription || '',
-      updatedAt: serverTimestamp(),
-    };
-    if (product.compareAtPrice && product.compareAtPrice > 0) {
-      payload.compareAtPrice = Number(product.compareAtPrice);
-    }
-    if (!product.createdAt) {
-      payload.createdAt = serverTimestamp();
-    }
+    const payload = buildProductFirestorePayload(product);
     await setDoc(doc(db, 'products', product.id), payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function batchSaveProductsToFirestore(productsList: Product[]): Promise<void> {
+  if (!db || productsList.length === 0) return;
+  const chunkSize = 250;
+  for (let i = 0; i < productsList.length; i += chunkSize) {
+    const chunk = productsList.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    chunk.forEach((product) => {
+      batch.set(doc(db!, 'products', product.id), buildProductFirestorePayload(product), {
+        merge: true,
+      });
+    });
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.WRITE,
+        `products/batch(${chunk.map((p) => p.id).slice(0, 3).join(',')})`
+      );
+    }
   }
 }
 
@@ -1487,6 +1552,136 @@ export function subscribeToAuthState(callback: (user: User | null) => void): () 
     return () => {};
   }
   return onAuthStateChanged(auth, callback);
+}
+
+// ---------------- SUPPLIER INTEGRATIONS & IMPORT LOGS ----------------
+
+export function subscribeToSupplierIntegrationsFirestore(
+  onConfigs: (configs: SupplierIntegrationConfig[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db) return () => {};
+  const collectionPath = 'supplierIntegrations';
+  return onSnapshot(
+    collection(db, collectionPath),
+    (snapshot) => {
+      const list: SupplierIntegrationConfig[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          ...d,
+          id: docSnap.id,
+          updatedAt: d.updatedAt?.toDate ? d.updatedAt.toDate().toISOString() : d.updatedAt,
+        } as SupplierIntegrationConfig);
+      });
+      onConfigs(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, collectionPath);
+      } catch (e) {
+        if (onError && e instanceof Error) onError(e);
+      }
+    }
+  );
+}
+
+export async function saveSupplierIntegrationToFirestore(
+  config: SupplierIntegrationConfig
+): Promise<void> {
+  if (!db) return;
+  const docPath = `supplierIntegrations/${config.id}`;
+  try {
+    const clean = stripUndefined({
+      id: config.id.slice(0, 64),
+      supplierName: config.supplierName.slice(0, 60),
+      status: config.status,
+      lastTestedAt: config.lastTestedAt ? config.lastTestedAt.slice(0, 64) : undefined,
+      lastSyncedAt: config.lastSyncedAt ? config.lastSyncedAt.slice(0, 64) : undefined,
+      lastError: config.lastError ? config.lastError.slice(0, 500) : undefined,
+      defaultMarkupType: config.defaultMarkupType,
+      defaultMarkupValue: Math.min(1000000, Math.max(0, Number(config.defaultMarkupValue || 0))),
+      defaultCategoryId: config.defaultCategoryId ? config.defaultCategoryId.slice(0, 64) : undefined,
+      defaultPublishStatus: config.defaultPublishStatus,
+      importedCount: Math.max(0, Math.floor(Number(config.importedCount || 0))),
+      updatedAt: serverTimestamp(),
+    });
+    await setDoc(doc(db, 'supplierIntegrations', config.id), clean, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export function subscribeToSupplierImportLogsFirestore(
+  onLogs: (logs: SupplierImportLog[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db) return () => {};
+  const collectionPath = 'supplierImportLogs';
+  return onSnapshot(
+    collection(db, collectionPath),
+    (snapshot) => {
+      const list: SupplierImportLog[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          ...d,
+          id: docSnap.id,
+        } as SupplierImportLog);
+      });
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onLogs(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, collectionPath);
+      } catch (e) {
+        if (onError && e instanceof Error) onError(e);
+      }
+    }
+  );
+}
+
+export async function saveSupplierImportLogToFirestore(log: SupplierImportLog): Promise<void> {
+  if (!db) return;
+  const docPath = `supplierImportLogs/${log.id}`;
+  try {
+    const safeErrors = (log.errors || [])
+      .slice(0, 25)
+      .map((msg) => String(msg).slice(0, 300));
+    const clean = stripUndefined({
+      id: log.id.slice(0, 80),
+      supplierName: log.supplierName.slice(0, 60),
+      mode: log.mode,
+      categoryFilter: log.categoryFilter ? log.categoryFilter.slice(0, 100) : undefined,
+      totalProcessed: Math.max(0, Math.floor(log.totalProcessed)),
+      createdCount: Math.max(0, Math.floor(log.createdCount)),
+      updatedCount: Math.max(0, Math.floor(log.updatedCount)),
+      skippedCount: Math.max(0, Math.floor(log.skippedCount)),
+      failedCount: Math.max(0, Math.floor(log.failedCount)),
+      errors: safeErrors,
+      triggeredBy: (log.triggeredBy || 'admin').slice(0, 120),
+      createdAt: log.createdAt.slice(0, 64),
+    });
+    await setDoc(doc(db, 'supplierImportLogs', log.id), clean);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function deleteSupplierImportLogFromFirestore(logId: string): Promise<void> {
+  if (!db) throw new Error('Firebase Firestore is not configured.');
+  const docPath = `supplierImportLogs/${logId}`;
+  try {
+    await deleteDoc(doc(db, 'supplierImportLogs', logId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
+  }
+}
+
+export async function getCurrentUserIdToken(): Promise<string | null> {
+  if (!auth?.currentUser) return null;
+  return auth.currentUser.getIdToken();
 }
 
 export async function checkProductsCountInFirestore(): Promise<number> {

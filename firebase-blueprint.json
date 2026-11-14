@@ -25,6 +25,14 @@
         "isActive": { "type": "boolean" },
         "seoTitle": { "type": "string", "maxLength": 160 },
         "seoDescription": { "type": "string", "maxLength": 320 },
+        "supplierName": { "type": "string", "maxLength": 60 },
+        "supplierProductId": { "type": "string", "maxLength": 120 },
+        "supplierPrice": { "type": "number" },
+        "supplierStock": { "type": "number" },
+        "supplierLastSyncedAt": { "type": "string", "format": "date-time" },
+        "supplierCategory": { "type": "string", "maxLength": 100 },
+        "supplierMarkupType": { "type": "string", "enum": ["percentage", "fixed", "custom"] },
+        "supplierMarkupValue": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -233,6 +241,44 @@
         "status": { "type": "string", "enum": ["subscribed", "unsubscribed"] }
       },
       "required": ["email", "source", "status"]
+    },
+    "SupplierIntegration": {
+      "title": "SupplierIntegration",
+      "description": "Configuration and sync state for an external supplier integration (secrets are never stored here).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "supplierName": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["connected", "unconfigured", "error"] },
+        "lastTestedAt": { "type": "string", "maxLength": 64 },
+        "lastSyncedAt": { "type": "string", "maxLength": 64 },
+        "lastError": { "type": "string", "maxLength": 500 },
+        "defaultMarkupType": { "type": "string", "enum": ["percentage", "fixed", "custom"] },
+        "defaultMarkupValue": { "type": "number" },
+        "defaultCategoryId": { "type": "string", "maxLength": 64 },
+        "defaultPublishStatus": { "type": "string", "enum": ["draft", "published"] },
+        "importedCount": { "type": "number" }
+      },
+      "required": ["id", "supplierName", "status"]
+    },
+    "SupplierImportLog": {
+      "title": "SupplierImportLog",
+      "description": "Audit log for supplier product imports and manual synchronization runs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 80 },
+        "supplierName": { "type": "string", "maxLength": 60 },
+        "mode": { "type": "string", "enum": ["selected", "category", "sync"] },
+        "categoryFilter": { "type": "string", "maxLength": 100 },
+        "totalProcessed": { "type": "number" },
+        "createdCount": { "type": "number" },
+        "updatedCount": { "type": "number" },
+        "skippedCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "triggeredBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "supplierName", "mode", "totalProcessed", "createdCount", "updatedCount", "skippedCount", "failedCount", "triggeredBy", "createdAt"]
     }
   },
   "firestore": {
@@ -295,6 +341,14 @@
     "/newsletterSubscribers/{subscriberId}": {
       "schema": { "$ref": "#/entities/NewsletterSubscriber" },
       "description": "Newsletter email subscribers (write-only for public visitors, readable only by admins)."
+    },
+    "/supplierIntegrations/{integrationId}": {
+      "schema": { "$ref": "#/entities/SupplierIntegration" },
+      "description": "Admin-only supplier integration statuses and markup defaults."
+    },
+    "/supplierImportLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SupplierImportLog" },
+      "description": "Admin-only history logs of supplier imports and catalog syncs."
     }
   }
 }

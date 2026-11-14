@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   Navigation,
   HardDrive,
+  PlugZap,
 } from 'lucide-react';
 import {
   useApp,
@@ -60,6 +61,7 @@ import {
 } from './admin/MarketingMediaSeoPanels';
 import { MediaPickerModal } from './admin/MediaPickerModal';
 import { StorageManagementPanel } from './admin/StorageManagementPanel';
+import { SupplierIntegrationsPanel } from './admin/SupplierIntegrationsPanel';
 import { ConfirmDeleteModal } from './admin/ConfirmDeleteModal';
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -422,6 +424,7 @@ export const AdminDashboard: React.FC = () => {
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: orders.length },
         { id: 'products', label: 'Products', icon: Package, badge: products.length },
         { id: 'categories', label: 'Categories', icon: Layers },
+        { id: 'suppliers', label: 'Supplier Integrations', icon: PlugZap },
       ],
     },
     {
@@ -1409,13 +1412,24 @@ export const AdminDashboard: React.FC = () => {
                           ) : null}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold text-[#171C19] truncate">
-                            {product.name}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-[#171C19] truncate">
+                              {product.name}
+                            </p>
+                            {product.supplierName && (
+                              <span className="px-1.5 py-0.5 rounded bg-[#E9EFEA] text-[#1B3B2B] font-mono text-[10px] font-medium">
+                                {product.supplierName}
+                                {product.supplierProductId ? ` #${product.supplierProductId}` : ''}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-[#5C655F]">
                             {product.categoryName} · Stock:{' '}
                             <span className="font-mono">{product.stock}</span> ·{' '}
-                            {product.isActive ? 'Active' : 'Hidden'}
+                            {product.isActive ? 'Published' : 'Draft (Hidden)'}
+                            {product.supplierPrice !== undefined && (
+                              <> · Supplier Cost: <span className="font-mono">{formatBDT(product.supplierPrice)}</span></>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -1648,7 +1662,8 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
-            {/* VISUAL CMS MODULES */}
+            {/* SUPPLIER INTEGRATIONS & VISUAL CMS MODULES */}
+            {activeTab === 'suppliers' && <SupplierIntegrationsPanel />}
             {activeTab === 'homepage' && <HomepageBuilderPanel />}
             {activeTab === 'customizer' && <WebsiteCustomizerPanel />}
             {activeTab === 'navigation' && <NavigationManagerPanel />}

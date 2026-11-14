@@ -23,6 +23,8 @@ import {
   Promotion,
   MediaAsset,
   NewsletterSubscriber,
+  SupplierIntegrationConfig,
+  SupplierImportLog,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -40,6 +42,7 @@ import {
   firebaseStatus,
   subscribeToProductsFirestore,
   saveProductToFirestore,
+  batchSaveProductsToFirestore,
   deleteProductFromFirestore,
   subscribeToCategoriesFirestore,
   saveCategoryToFirestore,
@@ -73,6 +76,11 @@ import {
   subscribeNewsletterInFirestore,
   subscribeToNewsletterSubscribersFirestore,
   deleteNewsletterSubscriberFromFirestore,
+  subscribeToSupplierIntegrationsFirestore,
+  saveSupplierIntegrationToFirestore,
+  subscribeToSupplierImportLogsFirestore,
+  saveSupplierImportLogToFirestore,
+  deleteSupplierImportLogFromFirestore,
   subscribeToAllUsersAdminFirestore,
   createOrderInFirestore,
   updateOrderInFirestore,
@@ -174,6 +182,8 @@ interface AppContextType {
   mediaAssets: MediaAsset[];
   newsletterSubscribers: NewsletterSubscriber[];
   adminCustomers: UserProfile[];
+  supplierIntegrations: SupplierIntegrationConfig[];
+  supplierImportLogs: SupplierImportLog[];
 
   // Navigation & catalog filters
   activeView: StoreView;
@@ -237,7 +247,11 @@ interface AppContextType {
 
   // Admin Catalog & CMS Management
   saveProduct: (product: Product) => Promise<void>;
+  batchSaveProducts: (products: Product[], customToast?: string) => Promise<void>;
   deleteProduct: (productId: string) => Promise<void>;
+  saveSupplierIntegration: (config: SupplierIntegrationConfig) => Promise<void>;
+  saveSupplierImportLog: (log: SupplierImportLog) => Promise<void>;
+  deleteSupplierImportLog: (logId: string) => Promise<void>;
   saveCategory: (category: Category) => Promise<void>;
   deleteCategory: (categoryId: string) => Promise<void>;
   saveBanner: (banner: Banner) => Promise<void>;
@@ -283,6 +297,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [firestoreMedia, setFirestoreMedia] = useState<MediaAsset[]>([]);
   const [newsletterSubscribers, setNewsletterSubscribers] = useState<NewsletterSubscriber[]>([]);
   const [adminCustomers, setAdminCustomers] = useState<UserProfile[]>([]);
+  const [supplierIntegrations, setSupplierIntegrations] = useState<SupplierIntegrationConfig[]>([]);
+  const [supplierImportLogs, setSupplierImportLogs] = useState<SupplierImportLog[]>([]);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
@@ -798,6 +814,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setFirestoreMedia([]);
         setNewsletterSubscribers([]);
         setAdminCustomers([]);
+        setSupplierIntegrations([]);
+        setSupplierImportLogs([]);
         hydratedCartUidRef.current = null;
       }
       setAuthLoading(false);
@@ -867,6 +885,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (list) => setAdminCustomers(list),
       (err) => console.warn('Admin customers error:', err.message)
     );
+    const unsubSuppliers = subscribeToSupplierIntegrationsFirestore(
+      (list) => setSupplierIntegrations(list),
+      (err) => console.warn('Supplier integrations error:', err.message)
+    );
+    const unsubSupplierLogs = subscribeToSupplierImportLogsFirestore(
+      (list) => setSupplierImportLogs(list),
+      (err) => console.warn('Supplier import logs error:', err.message)
+    );
 
     return () => {
       unsubOrders();
@@ -874,6 +900,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubMedia();
       unsubSubs();
       unsubCustomers();
+      unsubSuppliers();
+      unsubSupplierLogs();
     };
   }, [isAdmin]);
 
@@ -1590,6 +1618,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const batchSaveProducts = async (productsList: Product[], customToast?: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    if (productsList.length === 0) return;
+    try {
+      await batchSaveProductsToFirestore(productsList);
+      await markCollectionBootstrapped(['products']);
+      if (customToast) showToast(customToast);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const saveSupplierIntegration = async (config: SupplierIntegrationConfig) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await saveSupplierIntegrationToFirestore(config);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const saveSupplierImportLog = async (log: SupplierImportLog) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await saveSupplierImportLogToFirestore(log);
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const deleteSupplierImportLog = async (logId: string) => {
+    if (!isAdmin) throw new Error('Administrator authorization required.');
+    try {
+      await deleteSupplierImportLogFromFirestore(logId);
+      showToast('Import log deleted');
+    } catch (err) {
+      const msg = formatFirebaseError(err);
+      showToast(msg);
+      throw new Error(msg);
+    }
+  };
+
   const deleteProduct = async (productId: string) => {
     if (!isAdmin) throw new Error('Administrator authorization required.');
     const target = products.find((p) => p.id === productId);
@@ -2130,6 +2206,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         mediaAssets,
         newsletterSubscribers,
         adminCustomers,
+        supplierIntegrations,
+        supplierImportLogs,
 
         activeView,
         setActiveView,
@@ -2185,7 +2263,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteOrdersBulk,
 
         saveProduct,
+        batchSaveProducts,
         deleteProduct,
+        saveSupplierIntegration,
+        saveSupplierImportLog,
+        deleteSupplierImportLog,
         saveCategory,
         deleteCategory,
         saveBanner,

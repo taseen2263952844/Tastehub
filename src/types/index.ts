@@ -47,8 +47,49 @@ export interface Product {
   tags: string[];
   seoTitle?: string;
   seoDescription?: string;
+  // Supplier integration metadata
+  supplierName?: string;
+  supplierProductId?: string;
+  supplierPrice?: number;
+  supplierStock?: number;
+  supplierLastSyncedAt?: string;
+  supplierCategory?: string;
+  supplierMarkupType?: SupplierMarkupType;
+  supplierMarkupValue?: number;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export type SupplierMarkupType = 'percentage' | 'fixed' | 'custom';
+
+export interface SupplierIntegrationConfig {
+  id: string; // e.g., 'resellhat'
+  supplierName: string; // e.g., 'ResellHat'
+  status: 'connected' | 'unconfigured' | 'error';
+  lastTestedAt?: string;
+  lastSyncedAt?: string;
+  lastError?: string;
+  defaultMarkupType: SupplierMarkupType;
+  defaultMarkupValue: number;
+  defaultCategoryId: string;
+  defaultPublishStatus: 'draft' | 'published';
+  importedCount: number;
+  updatedAt?: string;
+}
+
+export interface SupplierImportLog {
+  id: string;
+  supplierName: string;
+  mode: 'selected' | 'category' | 'sync';
+  categoryFilter?: string;
+  totalProcessed: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errors: string[];
+  triggeredBy: string;
+  createdAt: string;
 }
 
 export interface CartItem {
