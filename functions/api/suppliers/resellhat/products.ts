@@ -8,3 +8,11 @@ interface PagesContext {
 export async function onRequestGet(context: PagesContext): Promise<Response> {
   return handleResellHatProducts(context.request, context.env);
 }
+
+export async function onRequestOptions(context: PagesContext): Promise<Response> {
+  return handleResellHatProducts(context.request, context.env);
+}
+
+export async function onRequest(context: PagesContext): Promise<Response> {
+  return handleResellHatProducts(context.request, context.env);
+}

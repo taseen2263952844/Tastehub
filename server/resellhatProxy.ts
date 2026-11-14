@@ -33,10 +33,28 @@ const AUTHORIZED_ADMIN_EMAIL = 'bdtaseengaming@gmail.com';
 const RESELLHAT_BASE_URL = 'https://resellhat.com/api/v1/products';
 const UPSTREAM_TIMEOUT_MS = 20000;
 
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Accept, Content-Type',
+  'Access-Control-Max-Age': '86400',
+};
+
+export function corsPreflightResponse(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...CORS_HEADERS,
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 export function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
+      ...CORS_HEADERS,
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store, private',
     },
@@ -45,9 +63,9 @@ export function jsonResponse(body: Record<string, unknown>, status = 200): Respo
 
 function getResellHatApiKey(env: ProxyEnv): string {
   const candidates = [
-    env.RESELLHAT_API_KEY,
-    env['RESELL' + 'HAT_API_KEY'],
+    env.RESSELLHAT_API_KEY,
     env['RESSELL' + 'HAT_API_KEY'],
+    env.RESELLHAT_API_KEY,
   ];
   for (const candidate of candidates) {
     const trimmed = (candidate || '').trim();
@@ -392,7 +410,6 @@ async function fetchResellHatUpstream(
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
-        'User-Agent': 'VEYRA-Ecommerce-Proxy/1.0',
       },
       signal: controller.signal,
     });
@@ -405,9 +422,10 @@ async function fetchResellHatUpstream(
         response: jsonResponse(
           {
             ok: false,
+            connected: false,
             code: 'UPSTREAM_AUTH_FAILED',
-            message:
-              'ResellHat rejected the server API key (401/403). Verify RESELLHAT_API_KEY in Cloudflare Pages environment secrets.',
+            upstreamStatus: res.status,
+            message: `ResellHat rejected the server API key (Supplier HTTP ${res.status}). Verify RESSELLHAT_API_KEY in Cloudflare Pages environment secrets.`,
           },
           502
         ),
@@ -420,8 +438,11 @@ async function fetchResellHatUpstream(
         response: jsonResponse(
           {
             ok: false,
+            connected: false,
             code: 'RATE_LIMITED',
-            message: 'ResellHat API rate limit reached. Please pause briefly and try again.',
+            upstreamStatus: res.status,
+            message:
+              'ResellHat API rate limit reached (Supplier HTTP 429). Please pause briefly and try again.',
           },
           429
         ),
@@ -434,7 +455,9 @@ async function fetchResellHatUpstream(
         response: jsonResponse(
           {
             ok: false,
+            connected: false,
             code: 'UPSTREAM_HTTP_ERROR',
+            upstreamStatus: res.status,
             message: `ResellHat API returned HTTP ${res.status}.`,
           },
           502
@@ -537,8 +560,15 @@ export async function handleResellHatTestConnection(
   request: Request,
   env: ProxyEnv
 ): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'POST') {
-    return jsonResponse({ ok: false, message: 'Method not allowed' }, 405);
+  if (request.method === 'OPTIONS') {
+    return corsPreflightResponse();
+  }
+
+  if (request.method !== 'GET') {
+    return jsonResponse(
+      { ok: false, code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed. Use GET.' },
+      405
+    );
   }
 
   const authCheck = await verifyAdminRequest(request, env);
@@ -552,7 +582,7 @@ export async function handleResellHatTestConnection(
         connected: false,
         code: 'MISSING_API_KEY',
         message:
-          'Server secret RESELLHAT_API_KEY is not configured. Add RESELLHAT_API_KEY in Cloudflare Pages → Settings → Environment variables (or .env locally) and redeploy.',
+          'Server secret RESSELLHAT_API_KEY is not configured. Add RESSELLHAT_API_KEY in Cloudflare Pages → Settings → Environment variables (or .env locally) and redeploy.',
       },
       503
     );
@@ -564,6 +594,7 @@ export async function handleResellHatTestConnection(
   return jsonResponse({
     ok: true,
     connected: true,
+    upstreamStatus: 200,
     supplier: 'ResellHat',
     latencyMs: probe.latencyMs,
     totalProducts: probe.payload.meta.total,
@@ -578,8 +609,15 @@ export async function handleResellHatProducts(
   request: Request,
   env: ProxyEnv
 ): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return corsPreflightResponse();
+  }
+
   if (request.method !== 'GET') {
-    return jsonResponse({ ok: false, message: 'Method not allowed' }, 405);
+    return jsonResponse(
+      { ok: false, code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed. Use GET.' },
+      405
+    );
   }
 
   const authCheck = await verifyAdminRequest(request, env);
@@ -592,7 +630,7 @@ export async function handleResellHatProducts(
         ok: false,
         code: 'MISSING_API_KEY',
         message:
-          'Server secret RESELLHAT_API_KEY is not configured. Set RESELLHAT_API_KEY in Cloudflare Pages → Settings → Environment variables.',
+          'Server secret RESSELLHAT_API_KEY is not configured. Set RESSELLHAT_API_KEY in Cloudflare Pages → Settings → Environment variables.',
       },
       503
     );
@@ -618,6 +656,7 @@ export async function handleResellHatProducts(
 
   return jsonResponse({
     ...result.payload,
+    upstreamStatus: 200,
     latencyMs: result.latencyMs,
   });
 }

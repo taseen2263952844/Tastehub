@@ -18,6 +18,7 @@ export interface ResellHatProductItem {
 export interface ResellHatTestResponse {
   ok: boolean;
   connected?: boolean;
+  upstreamStatus?: number;
   supplier?: string;
   latencyMs?: number;
   totalProducts?: number;
@@ -30,6 +31,7 @@ export interface ResellHatTestResponse {
 
 export interface ResellHatProductsResponse {
   ok: boolean;
+  upstreamStatus?: number;
   supplier?: string;
   data: ResellHatProductItem[];
   categories: string[];
@@ -58,16 +60,28 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 export async function testResellHatConnection(): Promise<ResellHatTestResponse> {
   const headers = await getAuthHeaders();
   const res = await fetch('/api/suppliers/resellhat/test', {
-    method: 'POST',
+    method: 'GET',
     headers,
   });
   const json = (await res.json().catch(() => null)) as ResellHatTestResponse | null;
   if (!json) {
-    throw new Error(`Unexpected response from server proxy (HTTP ${res.status}).`);
+    throw new Error(
+      res.status === 405
+        ? 'Server proxy rejected the request method (HTTP 405). Ensure Cloudflare Pages Functions are deployed for /api/suppliers/resellhat/test.'
+        : `Unexpected response from server proxy (HTTP ${res.status}).`
+    );
   }
   if (!res.ok || !json.ok) {
-    const err = new Error(json.message || `Connection test failed (HTTP ${res.status}).`);
-    (err as Error & { code?: string }).code = json.code;
+    const statusHint =
+      json.upstreamStatus && !String(json.message || '').includes(String(json.upstreamStatus))
+        ? ` (Supplier HTTP ${json.upstreamStatus})`
+        : '';
+    const err = new Error(
+      `${json.message || `Connection test failed (HTTP ${res.status}).`}${statusHint}`
+    );
+    (err as Error & { code?: string; upstreamStatus?: number }).code = json.code;
+    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus =
+      json.upstreamStatus;
     throw err;
   }
   return json;
@@ -96,8 +110,16 @@ export async function fetchResellHatProductsPage(params: {
     throw new Error(`Unexpected response from supplier proxy (HTTP ${res.status}).`);
   }
   if (!res.ok || !json.ok) {
-    const err = new Error(json.message || `Failed to load ResellHat products (HTTP ${res.status}).`);
-    (err as Error & { code?: string }).code = json.code;
+    const statusHint =
+      json.upstreamStatus && !String(json.message || '').includes(String(json.upstreamStatus))
+        ? ` (Supplier HTTP ${json.upstreamStatus})`
+        : '';
+    const err = new Error(
+      `${json.message || `Failed to load ResellHat products (HTTP ${res.status}).`}${statusHint}`
+    );
+    (err as Error & { code?: string; upstreamStatus?: number }).code = json.code;
+    (err as Error & { code?: string; upstreamStatus?: number }).upstreamStatus =
+      json.upstreamStatus;
     throw err;
   }
   return json;

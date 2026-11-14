@@ -798,12 +798,12 @@ export const SupplierIntegrationsPanel: React.FC = () => {
                 Go to <strong>Settings → Variables and Secrets</strong>.
               </li>
               <li>
-                Add a secret named <span className="font-mono font-semibold">RESELLHAT_API_KEY</span>{' '}
+                Add a secret named <span className="font-mono font-semibold">RESSELLHAT_API_KEY</span>{' '}
                 (Production &amp; Preview) containing your ResellHat Bearer token.
               </li>
               <li>
                 Redeploy Cloudflare Pages (or set{' '}
-                <span className="font-mono">RESELLHAT_API_KEY</span> in your server{' '}
+                <span className="font-mono">RESSELLHAT_API_KEY</span> in your server{' '}
                 <span className="font-mono">.env</span> locally), then click{' '}
                 <strong>Test API Connection</strong> above.
               </li>
@@ -1095,7 +1095,7 @@ export const SupplierIntegrationsPanel: React.FC = () => {
               No ResellHat products loaded yet
             </p>
             <p className="text-xs text-[#5C655F] max-w-md mx-auto">
-              Ensure <span className="font-mono">RESELLHAT_API_KEY</span> is configured in your server
+              Ensure <span className="font-mono">RESSELLHAT_API_KEY</span> is configured in your server
               environment secrets, then click <strong>Load ResellHat Products</strong> above.
             </p>
           </div>

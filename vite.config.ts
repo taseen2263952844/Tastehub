@@ -20,7 +20,7 @@ async function nodeToWebRequest(req: IncomingMessage): Promise<Request> {
 
   const method = req.method || 'GET';
   let body: BodyInit | undefined = undefined;
-  if (method !== 'GET' && method !== 'HEAD') {
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
