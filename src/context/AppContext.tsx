@@ -578,16 +578,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitPublicAdmission: AppContextValue['submitPublicAdmission'] = async (payload) => {
-    const res = await sofsApiFetch<{ admission: AdmissionApplication; localFallback?: boolean }>(
-      'admissions',
-      { method: 'POST', body: payload }
-    );
-    setAdmissions((prev) => [res.admission, ...prev]);
-    showToast(
-      `Admission request ${res.admission.referenceCode} submitted! Our academic coordinator will contact you shortly.`,
-      'success'
-    );
-    return res.admission;
+    try {
+      const res = await sofsApiFetch<{ admission: AdmissionApplication }>('admissions', {
+        method: 'POST',
+        body: payload,
+      });
+      setAdmissions((prev) => [res.admission, ...prev]);
+      showToast(
+        `Admission request ${res.admission.referenceCode} submitted! Our academic coordinator will contact you shortly.`,
+        'success'
+      );
+      return res.admission;
+    } catch (err: any) {
+      const message = err?.message || 'Could not submit admission application.';
+      showToast(message, 'error');
+      throw err;
+    }
   };
 
   const updateStudentProfile = async (updates: Partial<StudentProfile>) => {

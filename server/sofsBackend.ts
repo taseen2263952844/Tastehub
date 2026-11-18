@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { GoogleGenAI, Type } from '@google/genai';
+import { handlePublicAdmissionSubmit as handleAdmissionSubmission } from './sofsAdmissions';
 
 export interface SofsBackendEnv {
   SUPABASE_URL?: string;
@@ -47,8 +47,6 @@ interface VerifiedAdmin {
   fullName: string;
 }
 
-// Sliding window in-memory rate limit for public admissions (per worker isolate)
-const admissionRateLimiter = new Map<string, number[]>();
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -71,8 +69,18 @@ function getEnvValue(env: SofsBackendEnv, ...keys: string[]): string {
   return '';
 }
 
+function normalizeSupabaseBaseUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/rest\/v1$/i, '');
+  }
+}
+
 function createServiceSupabase(env: SofsBackendEnv): SupabaseClient | null {
-  const url = getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL');
+  const url = normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL'));
   const serviceKey = getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY');
   if (!url || !serviceKey) return null;
   return createClient(url, serviceKey, {
@@ -611,119 +619,6 @@ async function handlePublicBootstrap(env: SofsBackendEnv): Promise<Response> {
   });
 }
 
-async function handlePublicAdmissionSubmit(req: Request, env: SofsBackendEnv): Promise<Response> {
-  const clientIp =
-    req.headers.get('cf-connecting-ip') ||
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    'local';
-
-  const now = Date.now();
-  const windowMs = 10 * 60 * 1000;
-  const timestamps = (admissionRateLimiter.get(clientIp) || []).filter((ts) => now - ts < windowMs);
-  if (timestamps.length >= 6) {
-    return errorResponse('Too many admission submissions received from this device. Please wait a few minutes.', 429);
-  }
-  timestamps.push(now);
-  admissionRateLimiter.set(clientIp, timestamps);
-
-  let payload: Record<string, unknown>;
-  try {
-    payload = (await req.json()) as Record<string, unknown>;
-  } catch {
-    return errorResponse('Invalid JSON submission payload.', 400);
-  }
-
-  // Honeypot anti-spam field check
-  if (typeof payload.website === 'string' && payload.website.trim().length > 0) {
-    return errorResponse('Automated spam submission rejected.', 400);
-  }
-
-  const fullName = String(payload.fullName || '').trim();
-  const phone = String(payload.phone || '').trim();
-  const whatsapp = String(payload.whatsapp || '').trim();
-  const academicLevel = String(payload.academicLevel || '').trim();
-  const academicGroup = String(payload.academicGroup || 'Science').trim();
-  const desiredCourse = String(payload.desiredCourse || '').trim();
-  const preferredBatch = String(payload.preferredBatch || '').trim();
-  const message = String(payload.message || '').trim();
-
-  if (fullName.length < 2 || fullName.length > 120) {
-    return errorResponse('Full Name must be between 2 and 120 characters.', 400);
-  }
-  if (!/^[+0-9\s-]{8,24}$/.test(phone)) {
-    return errorResponse('Please provide a valid mobile phone number.', 400);
-  }
-  if (!academicLevel || !desiredCourse) {
-    return errorResponse('Class / Academic Level and Desired Course are required.', 400);
-  }
-  if (message.length > 1500) {
-    return errorResponse('Message is too long (maximum 1500 characters).', 400);
-  }
-
-  const referenceCode = `SOFS-ADM-${Math.floor(100000 + Math.random() * 900000)}`;
-  const supabase = createServiceSupabase(env);
-
-  if (!supabase) {
-    return jsonResponse({
-      ok: true,
-      localFallback: true,
-      admission: {
-        id: crypto.randomUUID(),
-        referenceCode,
-        fullName,
-        phone,
-        whatsapp,
-        academicLevel,
-        academicGroup,
-        desiredCourse,
-        preferredBatch,
-        message,
-        status: 'new',
-        createdAt: new Date().toISOString(),
-      },
-    });
-  }
-
-  const { data, error } = await supabase
-    .from('admissions')
-    .insert({
-      reference_code: referenceCode,
-      full_name: fullName,
-      phone,
-      whatsapp,
-      academic_level: academicLevel,
-      academic_group: academicGroup,
-      desired_course: desiredCourse,
-      preferred_batch: preferredBatch,
-      message,
-      status: 'new',
-    })
-    .select('*')
-    .single();
-
-  if (error) {
-    return errorResponse(`Database insert failed: ${error.message}`, 500);
-  }
-
-  return jsonResponse({
-    ok: true,
-    localFallback: false,
-    admission: {
-      id: data.id,
-      referenceCode: data.reference_code,
-      fullName: data.full_name,
-      phone: data.phone,
-      whatsapp: data.whatsapp,
-      academicLevel: data.academic_level,
-      academicGroup: data.academic_group,
-      desiredCourse: data.desired_course,
-      preferredBatch: data.preferred_batch,
-      message: data.message,
-      status: data.status,
-      createdAt: data.created_at,
-    },
-  });
-}
 
 async function ensureStudentRecord(
   supabase: SupabaseClient,
@@ -2111,6 +2006,7 @@ async function handleGeminiOcrExtract(req: Request, env: SofsBackendEnv): Promis
   if (!rawBase64) return errorResponse('No image or PDF payload uploaded for OCR.', 400);
 
   try {
+    const { GoogleGenAI, Type } = await import('@google/genai');
     const ai = new GoogleGenAI({
       apiKey: geminiKey,
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
@@ -2215,7 +2111,7 @@ export async function handleSofsApiRequest(req: Request, env: SofsBackendEnv): P
     return jsonResponse({
       ok: true,
       supabaseConfigured: Boolean(
-        getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL') &&
+        normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL')) &&
           getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY')
       ),
       geminiConfigured: Boolean(getEnvValue(env, 'GEMINI_API_KEY')),
@@ -2228,8 +2124,8 @@ export async function handleSofsApiRequest(req: Request, env: SofsBackendEnv): P
     return handlePublicBootstrap(env);
   }
 
-  if (route === 'admissions' && req.method === 'POST') {
-    return handlePublicAdmissionSubmit(req, env);
+  if (route === 'admissions') {
+    return handleAdmissionSubmission(req, env);
   }
 
   if (route === 'student/dashboard' && req.method === 'GET') {

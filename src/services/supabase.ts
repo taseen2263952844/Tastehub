@@ -1,7 +1,17 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentUserIdToken } from './firebase';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+function normalizeSupabaseUrl(rawUrl: string): string {
+  const trimmed = String(rawUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/rest\/v1$/i, '');
+  }
+}
+
+const supabaseUrl = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL || '');
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseBrowserConfigured = Boolean(supabaseUrl && supabaseAnonKey);
