@@ -5,16 +5,20 @@ export interface AssetsBinding {
   fetch: (input: Request | string | URL, init?: RequestInit) => Promise<Response>;
 }
 
+export interface WorkerSecretStoreBinding {
+  get: () => Promise<string>;
+}
+
+export type WorkerBindingValue = string | WorkerSecretStoreBinding | undefined;
+
 export interface WorkerEnv {
   ASSETS?: AssetsBinding;
-  SUPABASE_URL?: string;
-  VITE_SUPABASE_URL?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string;
-  GEMINI_API_KEY?: string;
-  FIREBASE_WEB_API_KEY?: string;
-  VITE_FIREBASE_API_KEY?: string;
-  FIREBASE_PROJECT_ID?: string;
-  VITE_FIREBASE_PROJECT_ID?: string;
+  SUPABASE_URL?: WorkerBindingValue;
+  SUPABASE_SERVICE_ROLE_KEY?: WorkerBindingValue;
+  GEMINI_API_KEY?: WorkerBindingValue;
+  FIREBASE_WEB_API_KEY?: WorkerBindingValue;
+  FIREBASE_PROJECT_ID?: WorkerBindingValue;
+  [key: string]: unknown;
 }
 
 const WORKER_JSON_HEADERS: Record<string, string> = {
@@ -32,27 +36,61 @@ function jsonError(message: string, status: number): Response {
   });
 }
 
-function toBackendEnv(env: WorkerEnv): SofsBackendEnv {
-  const out: SofsBackendEnv = {};
-  if (env && typeof env === 'object') {
-    for (const [key, value] of Object.entries(env)) {
-      if (key !== 'ASSETS' && typeof value === 'string') {
-        out[key] = value;
+async function readBindingValue(raw: unknown): Promise<string | undefined> {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    'get' in raw &&
+    typeof (raw as WorkerSecretStoreBinding).get === 'function'
+  ) {
+    try {
+      const resolved = await (raw as WorkerSecretStoreBinding).get();
+      if (typeof resolved === 'string' && resolved.trim().length > 0) {
+        return resolved.trim();
       }
+    } catch {
+      return undefined;
     }
   }
-  return out;
+  return undefined;
+}
+
+async function resolveWorkerEnv(env: WorkerEnv | undefined): Promise<SofsBackendEnv> {
+  if (!env || typeof env !== 'object') return {};
+
+  // Access each runtime binding directly by property name on `env` rather than enumerating
+  // with Object.entries(env), which can miss non-enumerable/prototype bindings in workerd.
+  const [supabaseUrl, serviceRoleKey, geminiApiKey, firebaseWebApiKey, firebaseProjectId] =
+    await Promise.all([
+      readBindingValue(env.SUPABASE_URL),
+      readBindingValue(env.SUPABASE_SERVICE_ROLE_KEY),
+      readBindingValue(env.GEMINI_API_KEY),
+      readBindingValue(env.FIREBASE_WEB_API_KEY),
+      readBindingValue(env.FIREBASE_PROJECT_ID),
+    ]);
+
+  return {
+    SUPABASE_URL: supabaseUrl,
+    SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    GEMINI_API_KEY: geminiApiKey,
+    FIREBASE_WEB_API_KEY: firebaseWebApiKey,
+    FIREBASE_PROJECT_ID: firebaseProjectId,
+  };
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, _ctx?: unknown): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // Normalize /api/sofs routes cleanly through the SOFS backend router
+    // Route all /api/sofs/* requests directly through the Worker backend using runtime env bindings
     if (pathname === '/api/sofs' || pathname.startsWith('/api/sofs/')) {
       try {
-        const backendEnv = toBackendEnv(env);
+        const backendEnv = await resolveWorkerEnv(env);
         const subRoute = pathname.replace(/^\/api\/sofs\/?/, '').replace(/\/+$/, '');
         if (subRoute === 'admissions') {
           return await handlePublicAdmissionSubmit(request, backendEnv);
@@ -70,16 +108,25 @@ export default {
         return new Response(null, { status: 204, headers: WORKER_JSON_HEADERS });
       }
       if (pathname === '/api/health' && request.method === 'GET') {
-        return new Response(JSON.stringify({ ok: true, runtime: 'cloudflare-worker' }), {
-          status: 200,
-          headers: WORKER_JSON_HEADERS,
-        });
+        const backendEnv = await resolveWorkerEnv(env);
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            runtime: 'cloudflare-worker',
+            hasSupabaseUrl: Boolean(backendEnv.SUPABASE_URL),
+            hasServiceRoleKey: Boolean(backendEnv.SUPABASE_SERVICE_ROLE_KEY),
+          }),
+          {
+            status: 200,
+            headers: WORKER_JSON_HEADERS,
+          }
+        );
       }
       return jsonError(`Unknown API endpoint: ${pathname}`, 404);
     }
 
     // Serve Vite static assets + SPA fallback via Cloudflare Worker ASSETS binding
-    if (env.ASSETS) {
+    if (env?.ASSETS) {
       return env.ASSETS.fetch(request);
     }
 

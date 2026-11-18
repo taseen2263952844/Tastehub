@@ -3,14 +3,11 @@ import { handlePublicAdmissionSubmit as handleAdmissionSubmission } from './sofs
 
 export interface SofsBackendEnv {
   SUPABASE_URL?: string;
-  VITE_SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   GEMINI_API_KEY?: string;
   FIREBASE_WEB_API_KEY?: string;
-  VITE_FIREBASE_API_KEY?: string;
   FIREBASE_PROJECT_ID?: string;
-  VITE_FIREBASE_PROJECT_ID?: string;
-  [key: string]: string | undefined;
+  [key: string]: unknown;
 }
 
 // Public Firebase Web API key from firebase-applet-config.json (client config; not a secret)
@@ -59,19 +56,11 @@ function errorResponse(message: string, status = 400, extra?: Record<string, unk
   return jsonResponse({ ok: false, status, message, ...(extra || {}) }, status);
 }
 
-function getEnvValue(env: SofsBackendEnv, ...keys: string[]): string {
+function getEnvValue(env: SofsBackendEnv | undefined, ...keys: string[]): string {
   for (const key of keys) {
     const val = env?.[key];
     if (typeof val === 'string' && val.trim().length > 0) {
       return val.trim();
-    }
-    const procEnv =
-      typeof globalThis !== 'undefined'
-        ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-        : undefined;
-    const procVal = procEnv?.[key];
-    if (typeof procVal === 'string' && procVal.trim().length > 0) {
-      return procVal.trim();
     }
   }
   return '';
@@ -108,7 +97,7 @@ function isPublishableOrAnonKey(key: string): boolean {
 }
 
 function createServiceSupabase(env: SofsBackendEnv): SupabaseClient | null {
-  const url = normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL'));
+  const url = normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL'));
   const serviceKey = getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY');
   if (!url || !serviceKey) return null;
 
@@ -151,9 +140,7 @@ async function verifyFirebaseIdToken(
   if (!match?.[1]) return null;
 
   const idToken = match[1].trim();
-  const apiKey =
-    getEnvValue(env, 'FIREBASE_WEB_API_KEY', 'VITE_FIREBASE_API_KEY') ||
-    FALLBACK_FIREBASE_WEB_API_KEY;
+  const apiKey = getEnvValue(env, 'FIREBASE_WEB_API_KEY') || FALLBACK_FIREBASE_WEB_API_KEY;
 
   try {
     const lookupRes = await fetch(
@@ -2162,15 +2149,16 @@ export async function handleSofsApiRequest(req: Request, env: SofsBackendEnv): P
   const route = url.pathname.replace(/^\/api\/sofs\/?/, '').replace(/\/+$/, '');
 
   if (route === 'health' && req.method === 'GET') {
+    const hasSupabaseUrl = Boolean(normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL')));
+    const hasServiceRoleKey = Boolean(getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY'));
     return jsonResponse({
       ok: true,
-      supabaseConfigured: Boolean(
-        normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL')) &&
-          getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY')
-      ),
+      runtime: 'cloudflare-worker',
+      supabaseConfigured: hasSupabaseUrl && hasServiceRoleKey,
+      hasSupabaseUrl,
+      hasServiceRoleKey,
       geminiConfigured: Boolean(getEnvValue(env, 'GEMINI_API_KEY')),
-      firebaseProjectId:
-        getEnvValue(env, 'FIREBASE_PROJECT_ID', 'VITE_FIREBASE_PROJECT_ID') || 'tastehub-16c49',
+      firebaseProjectId: getEnvValue(env, 'FIREBASE_PROJECT_ID') || 'tastehub-16c49',
     });
   }
 

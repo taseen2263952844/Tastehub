@@ -1,8 +1,7 @@
 export interface SofsAdmissionEnv {
   SUPABASE_URL?: string;
-  VITE_SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
-  [key: string]: string | undefined;
+  [key: string]: unknown;
 }
 
 export const ADMISSION_CORS_HEADERS: Record<string, string> = {
@@ -25,20 +24,10 @@ function jsonRes(body: unknown, status = 200, extraHeaders?: Record<string, stri
   });
 }
 
-function getEnv(env: SofsAdmissionEnv, ...keys: string[]): string {
-  for (const key of keys) {
-    const boundVal = env?.[key];
-    if (typeof boundVal === 'string' && boundVal.trim().length > 0) {
-      return boundVal.trim();
-    }
-    const procEnv =
-      typeof globalThis !== 'undefined'
-        ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-        : undefined;
-    const procVal = procEnv?.[key];
-    if (typeof procVal === 'string' && procVal.trim().length > 0) {
-      return procVal.trim();
-    }
+function getEnv(env: SofsAdmissionEnv | undefined, key: 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'): string {
+  const boundVal = env?.[key];
+  if (typeof boundVal === 'string' && boundVal.trim().length > 0) {
+    return boundVal.trim();
   }
   return '';
 }
@@ -200,17 +189,19 @@ export async function handlePublicAdmissionSubmit(
     );
   }
 
-  const rawSupabaseUrl = getEnv(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL');
+  const rawSupabaseUrl = getEnv(env, 'SUPABASE_URL');
   const supabaseUrl = normalizeSupabaseBaseUrl(rawSupabaseUrl);
   const serviceRoleKey = getEnv(env, 'SUPABASE_SERVICE_ROLE_KEY');
 
   if (!supabaseUrl || !serviceRoleKey) {
+    const missing: string[] = [];
+    if (!supabaseUrl) missing.push('SUPABASE_URL');
+    if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
     return jsonRes(
       {
         ok: false,
         status: 503,
-        message:
-          'Admission database is not configured on the server. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+        message: `Admission database is not configured on the server. Missing Worker runtime binding(s): ${missing.join(', ')}. Configure them in Cloudflare Worker -> Settings -> Variables and Secrets and redeploy.`,
       },
       503
     );

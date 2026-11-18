@@ -49,9 +49,13 @@ function sofsDevBackendPlugin(loadedEnv: SofsBackendEnv): Plugin {
       try {
         req.url = `/api/sofs${req.url || ''}`;
         const webReq = await nodeToWebRequest(req);
+        const mergedEnv = { ...loadedEnv, ...process.env } as Record<string, string | undefined>;
         const runtimeEnv: SofsBackendEnv = {
-          ...loadedEnv,
-          ...process.env,
+          SUPABASE_URL: mergedEnv.SUPABASE_URL || mergedEnv.VITE_SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY: mergedEnv.SUPABASE_SERVICE_ROLE_KEY,
+          GEMINI_API_KEY: mergedEnv.GEMINI_API_KEY,
+          FIREBASE_WEB_API_KEY: mergedEnv.FIREBASE_WEB_API_KEY || mergedEnv.VITE_FIREBASE_API_KEY,
+          FIREBASE_PROJECT_ID: mergedEnv.FIREBASE_PROJECT_ID || mergedEnv.VITE_FIREBASE_PROJECT_ID,
         };
         const webRes = await handleSofsApiRequest(webReq, runtimeEnv);
         await sendWebResponse(webRes, res);
