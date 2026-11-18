@@ -4,6 +4,7 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "keep_vars": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
