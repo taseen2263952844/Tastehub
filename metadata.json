@@ -1,6 +1,6 @@
 {
-  "name": "TasteHub Restaurant",
-  "description": "TasteHub Restaurant - Authentic Bangladeshi cuisine & dining, easy online ordering, takeaway & delivery with real-time order tracking and admin management.",
+  "name": "SOFS Academic Coaching",
+  "description": "SOFS Academic Coaching (SOFS) — Modern academic coaching platform with public admissions, student portal, online examination system, automated/written grading, study resource library, and role-based administration.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,26 +1,26 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 @theme {
-  --color-ivory: #FAF8F4;
-  --color-ivory-surface: #F3F0E8;
-  --color-forest: #1B3B2B;
-  --color-forest-hover: #142D20;
-  --color-sage: #6E8774;
-  --color-sage-soft: #E9EFEA;
-  --color-ink: #171C19;
-  --color-ink-muted: #5C655F;
-  --color-hairline: #E4E0D6;
+  --color-canvas: #F8F9F7;
+  --color-surface: #EEF2EE;
+  --color-primary: #0F3D2E;
+  --color-primary-hover: #0A2C21;
+  --color-accent: #B47B2B;
+  --color-ink: #111915;
+  --color-ink-muted: #516058;
+  --color-hairline: #DDE3DD;
 }
 
 :root {
-  --veyra-primary: #1B3B2B;
-  --veyra-secondary: #6E8774;
-  --veyra-bg: #FAF8F4;
-  --veyra-surface: #F3F0E8;
-  --veyra-text: #171C19;
-  --veyra-font-heading: 'Cormorant Garamond', Georgia, serif;
-  --veyra-font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --veyra-radius: 0.75rem;
+  --sofs-primary: #0F3D2E;
+  --sofs-secondary: #2B5E4A;
+  --sofs-accent: #B47B2B;
+  --sofs-bg: #F8F9F7;
+  --sofs-surface: #EEF2EE;
+  --sofs-text: #111915;
+  --sofs-font-heading: 'Fraunces', Georgia, serif;
+  --sofs-font-body: 'Plus Jakarta Sans', 'Hind Siliguri', system-ui, -apple-system, sans-serif;
 }
 
 @layer utilities {
@@ -31,6 +31,9 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 html {
@@ -38,17 +41,33 @@ html {
 }
 
 body {
-  font-family: var(--veyra-font-body);
-  background-color: var(--veyra-bg);
-  color: var(--veyra-text);
+  font-family: var(--sofs-font-body);
+  background-color: var(--sofs-bg);
+  color: var(--sofs-text);
 }
 
 h1, h2, h3, .font-serif {
-  font-family: var(--veyra-font-heading);
+  font-family: var(--sofs-font-heading);
 }
 
 .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@media print {
+  header, footer, nav, .no-print {
+    display: none !important;
+  }
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+  .print-card {
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 1.5rem !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

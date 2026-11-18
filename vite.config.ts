@@ -3,11 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
-import {
-  handleResellHatProducts,
-  handleResellHatTestConnection,
-  type ProxyEnv,
-} from './server/resellhatProxy';
+import { handleSofsApiRequest, type SofsBackendEnv } from './server/sofsBackend';
 
 async function nodeToWebRequest(req: IncomingMessage): Promise<Request> {
   const host = req.headers.host || 'localhost:3000';
@@ -42,40 +38,31 @@ async function sendWebResponse(webRes: Response, res: ServerResponse): Promise<v
   res.end(text);
 }
 
-function resellHatDevProxyPlugin(proxyEnv: ProxyEnv): Plugin {
-  const attachProxyMiddleware = (middlewares: {
+function sofsDevBackendPlugin(loadedEnv: SofsBackendEnv): Plugin {
+  const attachMiddleware = (middlewares: {
     use: (
       route: string,
       handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void | Promise<void>
     ) => void;
   }) => {
-    middlewares.use('/api/suppliers/resellhat', async (req, res, next) => {
-      const pathOnly = (req.url || '').split('?')[0];
-      if (pathOnly !== '/test' && pathOnly !== '/products') {
-        return next();
-      }
+    middlewares.use('/api/sofs', async (req, res) => {
       try {
-        req.url = `/api/suppliers/resellhat${req.url || ''}`;
+        req.url = `/api/sofs${req.url || ''}`;
         const webReq = await nodeToWebRequest(req);
-        const runtimeEnv: ProxyEnv = {
-          ...proxyEnv,
+        const runtimeEnv: SofsBackendEnv = {
+          ...loadedEnv,
           ...process.env,
         };
-        const webRes =
-          pathOnly === '/test'
-            ? await handleResellHatTestConnection(webReq, runtimeEnv)
-            : await handleResellHatProducts(webReq, runtimeEnv);
+        const webRes = await handleSofsApiRequest(webReq, runtimeEnv);
         await sendWebResponse(webRes, res);
       } catch (err) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(
           JSON.stringify({
-            success: false,
             ok: false,
             status: 500,
-            message: err instanceof Error ? err.message : 'Internal proxy error',
-            data: null,
+            message: err instanceof Error ? err.message : 'SOFS backend error',
           })
         );
       }
@@ -83,12 +70,12 @@ function resellHatDevProxyPlugin(proxyEnv: ProxyEnv): Plugin {
   };
 
   return {
-    name: 'resellhat-server-proxy',
+    name: 'sofs-api-middleware',
     configureServer(server) {
-      attachProxyMiddleware(server.middlewares);
+      attachMiddleware(server.middlewares);
     },
     configurePreviewServer(server) {
-      attachProxyMiddleware(server.middlewares);
+      attachMiddleware(server.middlewares);
     },
   };
 }
@@ -97,7 +84,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [react(), tailwindcss(), resellHatDevProxyPlugin(env)],
+    plugins: [react(), tailwindcss(), sofsDevBackendPlugin(env)],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

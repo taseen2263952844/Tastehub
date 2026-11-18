@@ -1,471 +1,409 @@
-export type CategorySlug =
-  | 'all'
-  | 'electronics-gadgets'
-  | 'fashion'
-  | 'home-living'
-  | 'accessories'
-  | 'beauty-lifestyle'
-  | string;
+export type AppView =
+  | 'home'
+  | 'about'
+  | 'courses'
+  | 'teachers'
+  | 'batches'
+  | 'gallery'
+  | 'notices'
+  | 'contact'
+  | 'admission'
+  | 'portal'
+  | 'exam'
+  | 'admin';
 
-export interface Category {
+export type AdminRole =
+  | 'super_admin'
+  | 'content_manager'
+  | 'admission_manager'
+  | 'exam_manager'
+  | 'results_manager'
+  | 'resource_manager';
+
+export interface AdminUser {
   id: string;
-  name: string;
-  slug: string;
-  description: string;
-  imageUrl?: string;
-  displayOrder: number;
+  firebaseUid?: string;
+  email: string;
+  fullName: string;
+  role: AdminRole;
   isActive: boolean;
-}
-
-export interface ProductVariation {
-  id: string;
-  name: string; // e.g., "Forest Green", "Medium", "128GB"
-  type: string; // e.g., "Color", "Size", "Edition"
-  priceAdjustment: number; // BDT delta from base price
-  stock: number;
-}
-
-export interface Product {
-  id: string;
-  name: string;
-  slug: string;
-  categoryId: string;
-  categoryName: string;
-  price: number; // Base price in BDT (৳)
-  compareAtPrice?: number;
-  shortDescription: string;
-  description: string;
-  images: string[];
-  stock: number;
-  sku: string;
-  variations: ProductVariation[];
-  isFeatured: boolean;
-  isNewArrival: boolean;
-  isBestSeller: boolean;
-  popularityScore: number;
-  isActive: boolean;
-  tags: string[];
-  seoTitle?: string;
-  seoDescription?: string;
-  // Supplier integration metadata
-  supplierName?: string;
-  supplierProductId?: string;
-  supplierPrice?: number;
-  supplierStock?: number;
-  supplierLastSyncedAt?: string;
-  supplierCategory?: string;
-  supplierMarkupType?: SupplierMarkupType;
-  supplierMarkupValue?: number;
+  createdBy?: string;
   createdAt?: string;
-  updatedAt?: string;
 }
 
-export type SupplierMarkupType = 'percentage' | 'fixed' | 'custom';
-
-export interface SupplierIntegrationConfig {
-  id: string; // e.g., 'resellhat'
-  supplierName: string; // e.g., 'ResellHat'
-  status: 'connected' | 'unconfigured' | 'error';
-  lastTestedAt?: string;
-  lastSyncedAt?: string;
-  lastError?: string;
-  defaultMarkupType: SupplierMarkupType;
-  defaultMarkupValue: number;
-  defaultCategoryId: string;
-  defaultPublishStatus: 'draft' | 'published';
-  importedCount: number;
-  updatedAt?: string;
-}
-
-export interface SupplierImportLog {
+export interface SiteSettings {
   id: string;
-  supplierName: string;
-  mode: 'selected' | 'category' | 'sync';
-  categoryFilter?: string;
-  totalProcessed: number;
-  createdCount: number;
-  updatedCount: number;
-  skippedCount: number;
-  failedCount: number;
-  errors: string[];
-  triggeredBy: string;
+  instituteName: string;
+  shortName: string;
+  tagline: string;
+  heroHeadline: string;
+  heroSubheadline: string;
+  heroImageUrl: string;
+  aboutTitle: string;
+  aboutBody: string;
+  aboutImageUrl: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  backgroundColor: string;
+  announcementEnabled: boolean;
+  announcementText: string;
+  contactPhone: string;
+  whatsappNumber: string;
+  contactEmail: string;
+  campusAddress: string;
+  officeHours: string;
+  seoTitle: string;
+  seoDescription: string;
+  socialLinks: {
+    facebook?: string;
+    youtube?: string;
+    instagram?: string;
+    linkedin?: string;
+  };
+  updatedAt?: string;
+}
+
+export interface Teacher {
+  id: string;
+  name: string;
+  title: string;
+  department: string;
+  qualifications: string;
+  experienceYears: number;
+  bio: string;
+  photoUrl: string;
+  email?: string;
+  isPublished: boolean;
+  displayOrder: number;
+}
+
+export interface Course {
+  id: string;
+  slug: string;
+  title: string;
+  academicLevel: string;
+  academicGroup: string;
+  summary: string;
+  description: string;
+  durationLabel: string;
+  feeBdt: number;
+  feeLabel: string;
+  syllabusHighlights: string[];
+  coverImageUrl: string;
+  isFeatured: boolean;
+  isPublished: boolean;
+  displayOrder: number;
+}
+
+export interface Subject {
+  id: string;
+  courseId: string;
+  name: string;
+  code: string;
+  academicLevel: string;
+  teacherId?: string;
+  description: string;
+  isPublished: boolean;
+}
+
+export interface Batch {
+  id: string;
+  courseId: string;
+  name: string;
+  code: string;
+  academicLevel: string;
+  academicGroup: string;
+  leadTeacherId?: string;
+  scheduleSummary: string;
+  roomOrMode: string;
+  seatCapacity: number;
+  enrolledCount: number;
+  startDate: string;
+  status: 'open' | 'ongoing' | 'full' | 'archived';
+  isPublished: boolean;
+}
+
+export interface BatchSchedule {
+  id: string;
+  batchId: string;
+  subjectId?: string;
+  teacherId?: string;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  roomLabel: string;
+  topicNote: string;
+}
+
+export interface StudentProfile {
+  id: string;
+  firebaseUid: string;
+  studentCode: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  academicLevel: string;
+  academicGroup: string;
+  institutionName: string;
+  guardianName: string;
+  guardianPhone: string;
+  photoUrl?: string;
+  status: 'active' | 'pending' | 'suspended';
+  createdAt?: string;
+}
+
+export interface Enrollment {
+  id: string;
+  studentId: string;
+  courseId: string;
+  batchId?: string;
+  status: 'active' | 'completed' | 'dropped';
+  enrolledAt: string;
+}
+
+export type AdmissionStatus = 'new' | 'contacted' | 'counseling' | 'admitted' | 'archived';
+
+export interface AdmissionApplication {
+  id: string;
+  referenceCode: string;
+  fullName: string;
+  phone: string;
+  whatsapp?: string;
+  academicLevel: string;
+  academicGroup: string;
+  desiredCourse: string;
+  preferredBatch?: string;
+  message?: string;
+  status: AdmissionStatus;
+  staffNotes?: string;
+  handledBy?: string;
   createdAt: string;
 }
 
-export interface CartItem {
-  productId: string;
-  productName: string;
-  productImage: string;
-  categoryName: string;
-  unitPrice: number;
-  variationId?: string;
-  variationLabel?: string;
-  quantity: number;
-  maxStock: number;
-}
-
-export interface SavedAddress {
+export interface QuestionCategory {
   id: string;
-  label: string;
-  fullName: string;
-  phone: string;
-  city: string;
-  area: string;
-  streetAddress: string;
-  isDefault: boolean;
+  name: string;
+  subjectName: string;
+  academicLevel: string;
+  description?: string;
 }
 
-export interface UserProfile {
-  uid: string;
-  displayName: string;
-  email: string;
-  phone?: string;
-  savedAddresses: SavedAddress[];
-  updatedAt?: string;
+export interface QuestionOption {
+  key: 'A' | 'B' | 'C' | 'D' | string;
+  text: string;
+  equation?: string;
 }
 
-export type OrderStatus =
-  | 'Pending'
-  | 'Confirmed'
-  | 'Processing'
-  | 'Shipped'
-  | 'Delivered'
-  | 'Cancelled';
-
-export type PaymentMethod =
-  | 'cash_on_delivery'
-  | 'bkash_manual'
-  | 'nagad_manual';
-
-export type PaymentStatus =
-  | 'Unpaid'
-  | 'Pending Verification'
-  | 'Paid'
-  | 'Refunded';
-
-export interface OrderItemSummary {
-  productId: string;
-  productName: string;
-  productImage?: string;
-  variationLabel?: string;
-  unitPrice: number;
-  quantity: number;
-  lineTotal: number;
-}
-
-export interface Order {
+export interface Question {
   id: string;
-  orderNumber: string;
-  userId?: string;
-  customerName: string;
-  customerPhone: string;
-  customerEmail?: string;
-  city: string;
-  area: string;
-  deliveryAddress: string;
-  deliveryInstructions?: string;
-  paymentMethod: PaymentMethod;
-  paymentStatus: PaymentStatus;
-  paymentReference?: string;
-  items: OrderItemSummary[];
-  itemCount: number;
-  subtotal: number;
-  deliveryFee: number;
-  discountAmount?: number;
-  promoCode?: string;
-  totalAmount: number;
-  status: OrderStatus;
-  adminNotes?: string;
+  categoryId?: string;
+  subjectId?: string;
+  questionType: 'mcq' | 'written';
+  language: 'en' | 'bn' | 'bilingual';
+  difficulty: 'easy' | 'medium' | 'hard';
+  questionText: string;
+  equationLatex?: string;
+  diagramSvg?: string;
+  imageUrl?: string;
+  options: QuestionOption[];
+  correctOption?: string; // Stripped by server for active student exams
+  explanation?: string;
+  marks: number;
+  tags: string[];
+  createdBy?: string;
+  createdAt?: string;
+}
+
+export interface Exam {
+  id: string;
+  title: string;
+  courseId?: string;
+  subjectId?: string;
+  description: string;
+  instructions: string;
+  examType: 'mcq' | 'written' | 'mixed';
+  targetBatchIds: string[];
+  targetStudentIds: string[];
+  questionIds: string[];
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  totalMarks: number;
+  passMarks: number;
+  randomizeQuestions: boolean;
+  randomizeOptions: boolean;
+  negativeMarkingEnabled: boolean;
+  negativeMarkValue: number;
+  gradingScale: 'gpa_5' | 'percentage';
+  isPublished: boolean;
+  resultsPublished: boolean;
+  allowAnswerReview: boolean;
+  createdAt?: string;
+}
+
+export interface ExamAnswerRecord {
+  questionId: string;
+  selectedOption?: string;
+  writtenText?: string;
+  attachmentUrl?: string;
+  isCorrect?: boolean | null;
+  autoMarks: number;
+  manualMarks?: number | null;
+  graderFeedback?: string;
+  gradedBy?: string;
+}
+
+export interface ExamAttempt {
+  id: string;
+  examId: string;
+  studentId: string;
+  questionOrder: string[];
+  optionOrders: Record<string, string[]>;
+  autosavedAnswers: Record<string, { selectedOption?: string; writtenText?: string; attachmentUrl?: string }>;
+  answers: ExamAnswerRecord[];
+  startedAt: string;
+  expiresAt: string;
+  lastSavedAt: string;
+  submittedAt?: string;
+  status: 'in_progress' | 'submitted' | 'auto_submitted' | 'graded';
+}
+
+export interface ExamResult {
+  id: string;
+  examId: string;
+  attemptId: string;
+  studentId: string;
+  studentName?: string;
+  studentCode?: string;
+  batchId?: string;
+  batchName?: string;
+  totalMarks: number;
+  obtainedMarks: number;
+  mcqMarks: number;
+  writtenMarks: number;
+  negativeDeducted: number;
+  percentage: number;
+  letterGrade: string;
+  gpa: number;
+  rankInBatch?: number;
+  rankOverall?: number;
+  isPublished: boolean;
+  hallOfFame: boolean;
+  remarks?: string;
+  publishedAt?: string;
+}
+
+export interface StudyResource {
+  id: string;
+  title: string;
+  description: string;
+  resourceType: 'pdf' | 'note' | 'image' | 'video' | 'link';
+  category: string;
+  courseId?: string;
+  subjectId?: string;
+  batchId?: string;
+  accessLevel: 'public' | 'enrolled' | 'batch_specific';
+  fileUrl: string;
+  storagePath?: string;
+  fileSizeBytes?: number;
+  isPublished: boolean;
+  uploadedBy?: string;
+  createdAt: string;
+}
+
+export interface Notice {
+  id: string;
+  title: string;
+  body: string;
+  category: 'General' | 'Exam' | 'Schedule' | 'Admission' | 'Result' | string;
+  targetBatchId?: string;
+  attachmentUrl?: string;
+  isPinned: boolean;
+  isPublished: boolean;
+  publishedAt: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  studentId: string;
+  title: string;
+  body: string;
+  linkView: AppView;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface SupportMessage {
+  id: string;
+  ticketId: string;
+  senderRole: 'student' | 'staff';
+  senderName: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  studentId: string;
+  studentName?: string;
+  subject: string;
+  category: 'Academic' | 'Exam' | 'Batch' | 'Technical' | string;
+  priority: 'low' | 'normal' | 'high';
+  status: 'open' | 'in_review' | 'resolved' | 'closed';
+  messages: SupportMessage[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface Banner {
+export interface GalleryItem {
   id: string;
   title: string;
-  subtitle: string;
-  ctaText: string;
-  targetCategory: CategorySlug;
+  category: string;
+  caption: string;
   imageUrl: string;
-  isActive: boolean;
+  isPublished: boolean;
   displayOrder: number;
 }
 
-export interface SocialLinks {
-  instagram?: string;
-  facebook?: string;
-  youtube?: string;
-  tiktok?: string;
-  twitter?: string;
-}
-
-export interface FooterLink {
+export interface Testimonial {
   id: string;
-  label: string;
-  targetType: 'home' | 'shop' | 'category' | 'page' | 'blog' | 'tracking' | 'url';
-  targetValue: string;
-}
-
-export interface FooterColumn {
-  id: string;
-  title: string;
-  links: FooterLink[];
-}
-
-export interface StoreSettings {
-  id: string;
-  storeName: string;
-  tagline: string;
-  // Delivery & Payments
-  insideDhakaDeliveryFee: number;
-  outsideDhakaDeliveryFee: number;
-  freeDeliveryThreshold: number;
-  bkashEnabled: boolean;
-  bkashNumber: string;
-  nagadEnabled: boolean;
-  nagadNumber: string;
-  paymentInstructions: string;
-  supportPhone: string;
-  supportEmail: string;
-  // Website Customizer — Global
-  logoUrl?: string;
-  faviconUrl?: string;
-  primaryColor?: string;
-  secondaryColor?: string;
-  backgroundColor?: string;
-  surfaceColor?: string;
-  textColor?: string;
-  headingFont?: 'Cormorant Garamond' | 'Playfair Display' | 'Fraunces' | 'Plus Jakarta Sans';
-  bodyFont?: 'Plus Jakarta Sans' | 'DM Sans' | 'Manrope' | 'Lora';
-  buttonStyle?: 'solid' | 'outline';
-  borderRadius?: 'sharp' | 'soft' | 'rounded';
-  layoutWidth?: 'compact' | 'standard' | 'wide';
-  socialLinks?: SocialLinks;
-  // Announcement Bar
-  announcementEnabled?: boolean;
-  announcementText?: string;
-  announcementBgColor?: string;
-  announcementTextColor?: string;
-  announcementLink?: string;
-  // Header Customization
-  headerSticky?: boolean;
-  headerShowSearch?: boolean;
-  headerShowAccount?: boolean;
-  headerShowCart?: boolean;
-  headerBgColor?: string;
-  headerTextColor?: string;
-  headerMenuId?: string;
-  // Footer Customization
-  footerDescription?: string;
-  footerCopyright?: string;
-  footerShowNewsletter?: boolean;
-  footerBgColor?: string;
-  footerTextColor?: string;
-  footerColumns?: FooterColumn[];
-  // Global SEO
-  metaTitle?: string;
-  metaDescription?: string;
-  ogImageUrl?: string;
-  robotsAllowIndex?: boolean;
-  robotsCustomText?: string;
-  // Internal Firestore bootstrap tracking
-  bootstrappedCollections?: string[];
-}
-
-// ---------------- VISUAL HOMEPAGE BUILDER ----------------
-
-export type WebsiteSectionType =
-  | 'hero_banner'
-  | 'promotional_banner'
-  | 'image_text'
-  | 'featured_products'
-  | 'new_arrivals'
-  | 'best_sellers'
-  | 'category_grid'
-  | 'promotional_product_grid'
-  | 'image_gallery'
-  | 'brand_intro'
-  | 'testimonials'
-  | 'customer_reviews'
-  | 'newsletter'
-  | 'social_showcase'
-  | 'rich_text'
-  | 'countdown_promo'
-  | 'collection_showcase';
-
-export interface SectionItemEntry {
-  id: string;
-  title: string;
-  subtitle?: string;
-  body: string;
-  author?: string;
-  role?: string;
-  rating?: number;
-  imageUrl?: string;
-  linkUrl?: string;
-}
-
-export interface WebsiteSection {
-  id: string;
-  type: WebsiteSectionType;
-  name: string;
-  heading: string;
-  subtitle: string;
-  description: string;
-  images: string[];
-  backgroundColor: string;
-  textColor: string;
-  buttonText: string;
-  buttonTargetType: 'shop' | 'category' | 'product' | 'page' | 'blog' | 'url';
-  buttonDestination: string;
-  productCount: number;
-  productIds?: string[];
-  categorySlug?: string;
-  layout: 'split' | 'centered' | 'grid' | 'editorial';
-  alignment: 'left' | 'center' | 'right';
-  isVisible: boolean;
-  visibleDesktop: boolean;
-  visibleMobile: boolean;
+  studentName: string;
+  achievement: string;
+  cohort: string;
+  quote: string;
+  isPublished: boolean;
   displayOrder: number;
-  countdownEndAt?: string;
-  items?: SectionItemEntry[];
-  updatedAt?: string;
 }
-
-// ---------------- NAVIGATION MENUS ----------------
-
-export interface NavMenuItem {
-  id: string;
-  label: string;
-  targetType: 'home' | 'shop' | 'category' | 'product' | 'page' | 'blog' | 'tracking' | 'admin' | 'url';
-  targetValue: string;
-  children?: NavMenuItem[];
-}
-
-export interface NavigationMenu {
-  id: string;
-  name: string;
-  location: 'header' | 'footer' | 'custom';
-  items: NavMenuItem[];
-  updatedAt?: string;
-}
-
-// ---------------- CMS PAGES & POSTS ----------------
-
-export type PublicationStatus = 'draft' | 'published';
-export type PostStatus = 'draft' | 'published' | 'scheduled';
-export type PostType = 'blog' | 'announcement' | 'product_highlight' | 'campaign' | 'news';
-
-export interface CmsPage {
-  id: string;
-  title: string;
-  slug: string;
-  featuredImage?: string;
-  content: string;
-  seoTitle?: string;
-  seoDescription?: string;
-  status: PublicationStatus;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface CmsPost {
-  id: string;
-  title: string;
-  slug: string;
-  postType: PostType;
-  excerpt: string;
-  content: string;
-  featuredImage?: string;
-  galleryImages: string[];
-  categories: string[];
-  tags: string[];
-  seoTitle?: string;
-  seoDescription?: string;
-  status: PostStatus;
-  publishDate: string;
-  authorName: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// ---------------- PROMOTIONS & MARKETING ----------------
-
-export type DiscountType = 'percentage' | 'fixed' | 'free_delivery';
-
-export interface Promotion {
-  id: string;
-  code: string;
-  title: string;
-  description: string;
-  discountType: DiscountType;
-  discountValue: number;
-  minOrderAmount: number;
-  saleLabel?: string;
-  startDate: string;
-  endDate: string;
-  isActive: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// ---------------- MEDIA LIBRARY ----------------
-
-export type MediaFolder = 'products' | 'banners' | 'posts' | 'pages' | 'branding' | 'general';
 
 export interface MediaAsset {
   id: string;
-  name: string;
-  url: string;
-  folder: MediaFolder;
-  mimeType?: string;
-  sizeBytes?: number;
+  fileName: string;
+  bucket: string;
   storagePath?: string;
+  publicUrl: string;
+  mimeType: string;
+  sizeBytes: number;
   uploadedBy?: string;
-  createdAt?: string;
+  createdAt: string;
 }
 
-// ---------------- NEWSLETTER ----------------
-
-export interface NewsletterSubscriber {
+export interface AuditLog {
   id: string;
+  actorEmail: string;
+  actorRole: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AuthUser {
+  uid: string;
   email: string;
-  source: 'footer' | 'section';
-  status: 'subscribed' | 'unsubscribed';
-  createdAt?: string;
+  displayName: string;
+  photoURL?: string;
+  emailVerified: boolean;
 }
-
-// ---------------- WEBSITE VERSION SNAPSHOTS ----------------
-
-export interface WebsiteSnapshot {
-  id: string; // 'draft' | 'published' | 'ver-...'
-  versionLabel: string;
-  settings: StoreSettings;
-  sections: WebsiteSection[];
-  menus: NavigationMenu[];
-  publishedBy?: string;
-  publishedAt?: string;
-  updatedAt?: string;
-}
-
-export interface FirebaseConnectionStatus {
-  isConfigured: boolean;
-  projectId?: string;
-  storageBucket?: string;
-  mode: 'real' | 'unconfigured';
-  message: string;
-}
-
-export type SortOption = 'featured' | 'newest' | 'popularity' | 'price_asc' | 'price_desc';
-export type StoreView =
-  | 'home'
-  | 'shop'
-  | 'product'
-  | 'checkout'
-  | 'confirmation'
-  | 'account'
-  | 'tracking'
-  | 'blog'
-  | 'post'
-  | 'page'
-  | 'admin';

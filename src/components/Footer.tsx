@@ -1,199 +1,157 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { GraduationCap, Mail, MapPin, Phone, Clock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Send, Check } from 'lucide-react';
 
 export const Footer: React.FC = () => {
-  const {
-    navigateTarget,
-    setActiveView,
-    storeSettings,
-    currentUser,
-    setIsAuthModalOpen,
-    subscribeNewsletter,
-  } = useApp();
+  const { siteSettings, setView, openAdmissionModal, view } = useApp();
 
-  const [email, setEmail] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [subscribed, setSubscribed] = useState(false);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-
-  const footerBg = storeSettings.footerBgColor || storeSettings.primaryColor || '#1B3B2B';
-  const footerText = storeSettings.footerTextColor || '#FAF8F4';
-  const columns = storeSettings.footerColumns || [];
-  const social = storeSettings.socialLinks || {};
-
-  const handleSubscribe = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrMsg(null);
-    setSubmitting(true);
-    try {
-      await subscribeNewsletter(email, 'footer');
-      setSubscribed(true);
-      setEmail('');
-    } catch (err: any) {
-      setErrMsg(err?.message || 'Could not subscribe.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  if (view === 'exam') {
+    return null;
+  }
 
   return (
-    <footer
-      className="border-t border-black/10 mt-20"
-      style={{ backgroundColor: footerBg, color: footerText }}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 space-y-12">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-10">
-          {/* Brand Column */}
-          <div className="md:col-span-5 space-y-4">
-            <div className="font-serif text-3xl font-semibold tracking-[0.14em]">
-              {storeSettings.storeName}
+    <footer className="bg-[#111915] text-[#DCE2DC] border-t border-[#223029] print:hidden">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
+        <div className="space-y-4">
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-white"
+              style={{ backgroundColor: siteSettings.primaryColor || '#0F3D2E' }}
+            >
+              <GraduationCap className="w-5 h-5" />
             </div>
-            <p className="text-sm opacity-80 max-w-md leading-relaxed">
-              {storeSettings.footerDescription || storeSettings.tagline}
-            </p>
-            <div className="pt-1 text-xs opacity-75 space-y-1">
-              <p>Customer Care: {storeSettings.supportPhone}</p>
-              <p>Email: {storeSettings.supportEmail}</p>
-            </div>
-
-            {/* Social Media Links */}
-            <div className="flex flex-wrap gap-4 pt-2 text-xs font-medium">
-              {social.instagram && (
-                <a
-                  href={social.instagram}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="opacity-80 hover:opacity-100 underline underline-offset-4"
-                >
-                  Instagram
-                </a>
-              )}
-              {social.facebook && (
-                <a
-                  href={social.facebook}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="opacity-80 hover:opacity-100 underline underline-offset-4"
-                >
-                  Facebook
-                </a>
-              )}
-              {social.youtube && (
-                <a
-                  href={social.youtube}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="opacity-80 hover:opacity-100 underline underline-offset-4"
-                >
-                  YouTube
-                </a>
-              )}
-              {social.tiktok && (
-                <a
-                  href={social.tiktok}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="opacity-80 hover:opacity-100 underline underline-offset-4"
-                >
-                  TikTok
-                </a>
-              )}
+            <div>
+              <p className="font-serif text-lg font-bold text-white leading-tight">
+                {siteSettings.instituteName}
+              </p>
+              <p className="text-xs text-[#9AB0A3]">{siteSettings.shortName}</p>
             </div>
           </div>
-
-          {/* Dynamic Footer Columns */}
-          <div className="md:col-span-4 grid grid-cols-2 gap-8">
-            {columns.slice(0, 2).map((col) => (
-              <div key={col.id} className="space-y-3">
-                <h3 className="font-sans text-xs uppercase tracking-[0.16em] opacity-60 font-semibold">
-                  {col.title}
-                </h3>
-                <ul className="space-y-2 text-sm opacity-85">
-                  {col.links.map((link) => (
-                    <li key={link.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigateTarget(link.targetType, link.targetValue)}
-                        className="hover:opacity-100 hover:underline underline-offset-4 text-left transition-opacity"
-                      >
-                        {link.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-
-          {/* Newsletter & Quick Account */}
-          <div className="md:col-span-3 space-y-4">
-            {storeSettings.footerShowNewsletter !== false && (
-              <div className="space-y-3">
-                <h3 className="font-sans text-xs uppercase tracking-[0.16em] opacity-60 font-semibold">
-                  Stay Informed
-                </h3>
-                <p className="text-xs opacity-80 leading-relaxed">
-                  Receive quiet notes on seasonal arrivals and restocks.
-                </p>
-                {subscribed ? (
-                  <div className="p-3 rounded-xl bg-white/10 text-xs inline-flex items-center gap-2">
-                    <Check className="w-4 h-4" />
-                    <span>You are subscribed.</span>
-                  </div>
-                ) : (
-                  <form onSubmit={handleSubscribe} className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-xs placeholder:text-white/50 focus:outline-none focus:border-white"
-                      />
-                      <button
-                        type="submit"
-                        disabled={submitting}
-                        className="px-3 py-2 rounded-lg bg-[#FAF8F4] text-[#171C19] text-xs font-semibold hover:opacity-90 disabled:opacity-60 inline-flex items-center gap-1 shrink-0"
-                        aria-label="Subscribe to newsletter"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {errMsg && <p className="text-[11px] text-red-200">{errMsg}</p>}
-                  </form>
-                )}
-              </div>
-            )}
-
-            <div className="pt-2 space-y-1.5 text-xs opacity-80">
-              <button
-                type="button"
-                onClick={() => {
-                  if (currentUser) setActiveView('account');
-                  else setIsAuthModalOpen(true);
-                }}
-                className="block hover:underline underline-offset-2"
-              >
-                {currentUser ? 'My Account & Order History' : 'Customer Sign In'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('admin')}
-                className="block hover:underline underline-offset-2"
-              >
-                Store Administration
-              </button>
-            </div>
-          </div>
+          <p className="text-sm text-[#A9B8AF] leading-relaxed">{siteSettings.tagline}</p>
+          <button
+            type="button"
+            onClick={() => openAdmissionModal()}
+            className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold text-white"
+            style={{ backgroundColor: siteSettings.accentColor || '#B47B2B' }}
+          >
+            Apply for SOFS Admission
+          </button>
         </div>
 
-        <div className="pt-6 border-t border-white/15 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs opacity-65">
-          <p>
-            © {new Date().getFullYear()} {storeSettings.footerCopyright || 'VEYRA.'}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-white mb-4">
+            Academic Programs
+          </h3>
+          <ul className="space-y-2.5 text-sm text-[#A9B8AF]">
+            <li>
+              <button type="button" onClick={() => setView('courses')} className="hover:text-white">
+                SSC &amp; HSC Science Courses
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('batches')} className="hover:text-white">
+                Active Batches &amp; Class Routine
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('teachers')} className="hover:text-white">
+                Faculty Directory
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('notices')} className="hover:text-white">
+                Exam &amp; Notice Board
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-white mb-4">
+            Institute
+          </h3>
+          <ul className="space-y-2.5 text-sm text-[#A9B8AF]">
+            <li>
+              <button type="button" onClick={() => setView('about')} className="hover:text-white">
+                About SOFS
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('gallery')} className="hover:text-white">
+                Campus Gallery
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('admission')} className="hover:text-white">
+                SOFS Admission Desk
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick={() => setView('portal')} className="hover:text-white">
+                Student Portal &amp; Results
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div className="space-y-3 text-sm text-[#A9B8AF]">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-white mb-4">
+            Campus &amp; Contact
+          </h3>
+          <p className="flex items-start gap-2.5">
+            <MapPin className="w-4 h-4 text-[#B47B2B] shrink-0 mt-0.5" />
+            <span>{siteSettings.campusAddress}</span>
           </p>
-          <p>Cash on Delivery · Manual bKash & Nagad Verification · Bangladesh</p>
+          <p className="flex items-center gap-2.5">
+            <Phone className="w-4 h-4 text-[#B47B2B] shrink-0" />
+            <span className="tabular-nums">{siteSettings.contactPhone}</span>
+          </p>
+          <p className="flex items-center gap-2.5">
+            <Mail className="w-4 h-4 text-[#B47B2B] shrink-0" />
+            <span>{siteSettings.contactEmail}</span>
+          </p>
+          <p className="flex items-center gap-2.5">
+            <Clock className="w-4 h-4 text-[#B47B2B] shrink-0" />
+            <span>{siteSettings.officeHours}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-[#223029] py-5 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#85998D]">
+        <p>
+          &copy; {new Date().getFullYear()} {siteSettings.instituteName}. All rights reserved.
+        </p>
+        <div className="flex items-center gap-5">
+          {siteSettings.socialLinks?.facebook && (
+            <a
+              href={siteSettings.socialLinks.facebook}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-white"
+            >
+              Facebook
+            </a>
+          )}
+          {siteSettings.socialLinks?.youtube && (
+            <a
+              href={siteSettings.socialLinks.youtube}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-white"
+            >
+              YouTube
+            </a>
+          )}
+          {siteSettings.socialLinks?.instagram && (
+            <a
+              href={siteSettings.socialLinks.instagram}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-white"
+            >
+              Instagram
+            </a>
+          )}
         </div>
       </div>
     </footer>
