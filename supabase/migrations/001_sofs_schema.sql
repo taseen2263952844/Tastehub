@@ -29,23 +29,6 @@ AS $$
   );
 $$;
 
--- Helper check for verified active admin via JWT claim
-CREATE OR REPLACE FUNCTION public.is_sofs_admin(required_roles TEXT[] DEFAULT NULL)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.admin_users au
-    WHERE au.firebase_uid = public.current_firebase_uid()
-      AND au.is_active = TRUE
-      AND (required_roles IS NULL OR au.role = ANY(required_roles))
-  );
-$$;
-
 -- 1. Site Settings & CMS Configuration
 CREATE TABLE IF NOT EXISTS public.site_settings (
   id TEXT PRIMARY KEY DEFAULT 'main',
@@ -96,6 +79,24 @@ CREATE TABLE IF NOT EXISTS public.admin_users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Helper check for verified active admin via JWT claim
+-- Defined after public.admin_users exists so SQL function validation succeeds cleanly
+CREATE OR REPLACE FUNCTION public.is_sofs_admin(required_roles TEXT[] DEFAULT NULL)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.admin_users au
+    WHERE au.firebase_uid = public.current_firebase_uid()
+      AND au.is_active = TRUE
+      AND (required_roles IS NULL OR au.role = ANY(required_roles))
+  );
+$$;
 
 -- 3. Teachers / Faculty
 CREATE TABLE IF NOT EXISTS public.teachers (
@@ -539,19 +540,41 @@ ALTER TABLE public.media_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- Public Read Policies (Safe Published Content Only)
+DROP POLICY IF EXISTS "Public read site settings" ON public.site_settings;
 CREATE POLICY "Public read site settings" ON public.site_settings FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public read published teachers" ON public.teachers;
 CREATE POLICY "Public read published teachers" ON public.teachers FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read published courses" ON public.courses;
 CREATE POLICY "Public read published courses" ON public.courses FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read published subjects" ON public.subjects;
 CREATE POLICY "Public read published subjects" ON public.subjects FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read published batches" ON public.batches;
 CREATE POLICY "Public read published batches" ON public.batches FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read schedules" ON public.batch_schedules;
 CREATE POLICY "Public read schedules" ON public.batch_schedules FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public read published notices" ON public.notices;
 CREATE POLICY "Public read published notices" ON public.notices FOR SELECT USING (is_published = true AND target_batch_id IS NULL);
+
+DROP POLICY IF EXISTS "Public read published gallery" ON public.gallery_items;
 CREATE POLICY "Public read published gallery" ON public.gallery_items FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read published testimonials" ON public.testimonials;
 CREATE POLICY "Public read published testimonials" ON public.testimonials FOR SELECT USING (is_published = true);
+
+DROP POLICY IF EXISTS "Public read hall of fame" ON public.exam_results;
 CREATE POLICY "Public read hall of fame" ON public.exam_results FOR SELECT USING (is_published = true AND hall_of_fame = true);
+
+DROP POLICY IF EXISTS "Public read public resources" ON public.resources;
 CREATE POLICY "Public read public resources" ON public.resources FOR SELECT USING (is_published = true AND access_level = 'public');
 
 -- Public Admission Submission (No login required, status locked to 'new')
+DROP POLICY IF EXISTS "Public insert admission" ON public.admissions;
 CREATE POLICY "Public insert admission" ON public.admissions
   FOR INSERT
   WITH CHECK (
@@ -562,23 +585,28 @@ CREATE POLICY "Public insert admission" ON public.admissions
   );
 
 -- Student Private Policies (When Firebase JWT claims are verified by Supabase)
+DROP POLICY IF EXISTS "Student read own profile" ON public.students;
 CREATE POLICY "Student read own profile" ON public.students
   FOR SELECT USING (firebase_uid = public.current_firebase_uid());
 
+DROP POLICY IF EXISTS "Student update own safe profile" ON public.students;
 CREATE POLICY "Student update own safe profile" ON public.students
   FOR UPDATE USING (firebase_uid = public.current_firebase_uid())
   WITH CHECK (firebase_uid = public.current_firebase_uid());
 
+DROP POLICY IF EXISTS "Student read own enrollments" ON public.enrollments;
 CREATE POLICY "Student read own enrollments" ON public.enrollments
   FOR SELECT USING (
     EXISTS (SELECT 1 FROM public.students s WHERE s.id = enrollments.student_id AND s.firebase_uid = public.current_firebase_uid())
   );
 
+DROP POLICY IF EXISTS "Student read own notifications" ON public.notifications;
 CREATE POLICY "Student read own notifications" ON public.notifications
   FOR SELECT USING (
     EXISTS (SELECT 1 FROM public.students s WHERE s.id = notifications.student_id AND s.firebase_uid = public.current_firebase_uid())
   );
 
+DROP POLICY IF EXISTS "Student read own results when published" ON public.exam_results;
 CREATE POLICY "Student read own results when published" ON public.exam_results
   FOR SELECT USING (
     is_published = true AND EXISTS (
@@ -588,6 +616,7 @@ CREATE POLICY "Student read own results when published" ON public.exam_results
 
 -- Explicit Deny on Sensitive Answer Keys & Admin Logs for anon/authenticated direct client queries
 -- (Served through server-side Cloudflare Pages Functions using SUPABASE_SERVICE_ROLE_KEY after role/window checks)
+DROP POLICY IF EXISTS "Admins manage all via verified JWT" ON public.admin_users;
 CREATE POLICY "Admins manage all via verified JWT" ON public.admin_users
   FOR ALL USING (public.is_sofs_admin(ARRAY['super_admin']));
 
@@ -602,12 +631,28 @@ VALUES
   ('sofs-resources', 'sofs-resources', false, 26214400, ARRAY['application/pdf','image/jpeg','image/png','image/webp','video/mp4'])
 ON CONFLICT (id) DO NOTHING;
 
+DROP POLICY IF EXISTS "Public read public SOFS buckets" ON storage.objects;
 CREATE POLICY "Public read public SOFS buckets"
   ON storage.objects FOR SELECT
   USING (bucket_id IN ('sofs-media', 'sofs-gallery', 'sofs-questions'));
 
 -- Realtime publication setup for notices, notifications, and support messages
-ALTER PUBLICATION supabase_realtime ADD TABLE public.notices;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.support_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.support_tickets;
+DO $$
+DECLARE
+  rt_tbl TEXT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    FOREACH rt_tbl IN ARRAY ARRAY['notices', 'notifications', 'support_messages', 'support_tickets']
+    LOOP
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND schemaname = 'public'
+          AND tablename = rt_tbl
+      ) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I;', rt_tbl);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
