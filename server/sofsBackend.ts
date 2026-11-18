@@ -61,17 +61,28 @@ function errorResponse(message: string, status = 400, extra?: Record<string, unk
 
 function getEnvValue(env: SofsBackendEnv, ...keys: string[]): string {
   for (const key of keys) {
-    const val = env[key];
+    const val = env?.[key];
     if (typeof val === 'string' && val.trim().length > 0) {
       return val.trim();
+    }
+    const procEnv =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+        : undefined;
+    const procVal = procEnv?.[key];
+    if (typeof procVal === 'string' && procVal.trim().length > 0) {
+      return procVal.trim();
     }
   }
   return '';
 }
 
 function normalizeSupabaseBaseUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  let trimmed = rawUrl.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
   try {
     return new URL(trimmed).origin;
   } catch {
@@ -2006,7 +2017,7 @@ async function handleGeminiOcrExtract(req: Request, env: SofsBackendEnv): Promis
   if (!rawBase64) return errorResponse('No image or PDF payload uploaded for OCR.', 400);
 
   try {
-    const { GoogleGenAI, Type } = await import('@google/genai');
+    const { GoogleGenAI, Type } = await import('@google/genai/web');
     const ai = new GoogleGenAI({
       apiKey: geminiKey,
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },

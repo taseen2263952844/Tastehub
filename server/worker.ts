@@ -33,16 +33,15 @@ function jsonError(message: string, status: number): Response {
 }
 
 function toBackendEnv(env: WorkerEnv): SofsBackendEnv {
-  return {
-    SUPABASE_URL: env.SUPABASE_URL,
-    VITE_SUPABASE_URL: env.VITE_SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-    GEMINI_API_KEY: env.GEMINI_API_KEY,
-    FIREBASE_WEB_API_KEY: env.FIREBASE_WEB_API_KEY,
-    VITE_FIREBASE_API_KEY: env.VITE_FIREBASE_API_KEY,
-    FIREBASE_PROJECT_ID: env.FIREBASE_PROJECT_ID,
-    VITE_FIREBASE_PROJECT_ID: env.VITE_FIREBASE_PROJECT_ID,
-  };
+  const out: SofsBackendEnv = {};
+  if (env && typeof env === 'object') {
+    for (const [key, value] of Object.entries(env)) {
+      if (key !== 'ASSETS' && typeof value === 'string') {
+        out[key] = value;
+      }
+    }
+  }
+  return out;
 }
 
 export default {

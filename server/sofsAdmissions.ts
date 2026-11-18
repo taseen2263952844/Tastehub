@@ -27,17 +27,28 @@ function jsonRes(body: unknown, status = 200, extraHeaders?: Record<string, stri
 
 function getEnv(env: SofsAdmissionEnv, ...keys: string[]): string {
   for (const key of keys) {
-    const val = env?.[key];
-    if (typeof val === 'string' && val.trim().length > 0) {
-      return val.trim();
+    const boundVal = env?.[key];
+    if (typeof boundVal === 'string' && boundVal.trim().length > 0) {
+      return boundVal.trim();
+    }
+    const procEnv =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+        : undefined;
+    const procVal = procEnv?.[key];
+    if (typeof procVal === 'string' && procVal.trim().length > 0) {
+      return procVal.trim();
     }
   }
   return '';
 }
 
 function normalizeSupabaseBaseUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  let trimmed = rawUrl.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
   try {
     const parsed = new URL(trimmed);
     return parsed.origin;
