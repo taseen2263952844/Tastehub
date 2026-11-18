@@ -90,12 +90,55 @@ function normalizeSupabaseBaseUrl(rawUrl: string): string {
   }
 }
 
+function isPublishableOrAnonKey(key: string): boolean {
+  const trimmed = key.trim();
+  if (trimmed.startsWith('sb_publishable_')) return true;
+  const parts = trimmed.split('.');
+  if (parts.length === 3) {
+    try {
+      const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, '=');
+      const claims = JSON.parse(atob(padded)) as { role?: string };
+      if (claims?.role === 'anon') return true;
+    } catch {
+      // Ignore non-JWT tokens
+    }
+  }
+  return false;
+}
+
 function createServiceSupabase(env: SofsBackendEnv): SupabaseClient | null {
   const url = normalizeSupabaseBaseUrl(getEnvValue(env, 'SUPABASE_URL', 'VITE_SUPABASE_URL'));
   const serviceKey = getEnvValue(env, 'SUPABASE_SERVICE_ROLE_KEY');
   if (!url || !serviceKey) return null;
+
+  if (isPublishableOrAnonKey(serviceKey)) {
+    throw new Error(
+      'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is set to a public anon/publishable key. Replace it with a Supabase secret key (sb_secret_...) or service_role key.'
+    );
+  }
+
+  const isSecretKey = serviceKey.startsWith('sb_secret_');
+  const serverFetch: typeof fetch | undefined = isSecretKey
+    ? async (input, init) => {
+        const headers = new Headers(
+          init?.headers || (input instanceof Request ? input.headers : undefined)
+        );
+        if (!headers.has('apikey')) {
+          headers.set('apikey', serviceKey);
+        }
+        const authVal = headers.get('Authorization') || headers.get('authorization');
+        if (authVal && authVal.trim() === `Bearer ${serviceKey}`) {
+          headers.delete('Authorization');
+          headers.delete('authorization');
+        }
+        return fetch(input, { ...init, headers });
+      }
+    : undefined;
+
   return createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    ...(serverFetch ? { global: { fetch: serverFetch } } : {}),
   });
 }
 
@@ -1999,7 +2042,7 @@ async function handleGeminiOcrExtract(req: Request, env: SofsBackendEnv): Promis
   const geminiKey = getEnvValue(env, 'GEMINI_API_KEY');
   if (!geminiKey) {
     return errorResponse(
-      'GEMINI_API_KEY is not configured in server environment variables. Please set GEMINI_API_KEY in Cloudflare Pages or .env.',
+      'GEMINI_API_KEY is not configured in server environment variables. Please set GEMINI_API_KEY in Cloudflare Worker Secrets or .env.',
       503
     );
   }

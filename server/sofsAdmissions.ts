@@ -57,6 +57,43 @@ function normalizeSupabaseBaseUrl(rawUrl: string): string {
   }
 }
 
+function detectSupabaseKeyType(
+  key: string
+): 'secret' | 'service_role_jwt' | 'publishable' | 'anon_jwt' | 'unknown' {
+  const trimmed = key.trim();
+  if (trimmed.startsWith('sb_secret_')) return 'secret';
+  if (trimmed.startsWith('sb_publishable_')) return 'publishable';
+  const parts = trimmed.split('.');
+  if (parts.length === 3) {
+    try {
+      const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, '=');
+      const claims = JSON.parse(atob(padded)) as { role?: string };
+      if (claims?.role === 'service_role') return 'service_role_jwt';
+      if (claims?.role === 'anon') return 'anon_jwt';
+    } catch {
+      // Ignore malformed token payload
+    }
+  }
+  return 'unknown';
+}
+
+function buildSupabaseServerHeaders(serverKey: string): Record<string, string> {
+  const keyType = detectSupabaseKeyType(serverKey);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    apikey: serverKey,
+    Prefer: 'return=representation',
+  };
+  // New-format Supabase secret keys (sb_secret_...) are not JWTs and must only be sent in `apikey`.
+  // Legacy service_role JWTs use both `apikey` and `Authorization: Bearer`.
+  if (keyType !== 'secret') {
+    headers.Authorization = `Bearer ${serverKey}`;
+  }
+  return headers;
+}
+
 export async function handlePublicAdmissionSubmit(
   req: Request,
   env: SofsAdmissionEnv
@@ -179,18 +216,25 @@ export async function handlePublicAdmissionSubmit(
     );
   }
 
+  const keyType = detectSupabaseKeyType(serviceRoleKey);
+  if (keyType === 'publishable' || keyType === 'anon_jwt') {
+    return jsonRes(
+      {
+        ok: false,
+        status: 500,
+        message:
+          'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is set to a public anon/publishable key. Replace it in Cloudflare Worker Secrets with your Supabase secret key (sb_secret_...) or legacy service_role key.',
+      },
+      500
+    );
+  }
+
   const referenceCode = `SOFS-ADM-${Math.floor(100000 + Math.random() * 900000)}`;
 
   try {
     const restRes = await fetch(`${supabaseUrl}/rest/v1/admissions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        Prefer: 'return=representation',
-      },
+      headers: buildSupabaseServerHeaders(serviceRoleKey),
       body: JSON.stringify({
         reference_code: referenceCode,
         full_name: fullName,
@@ -220,9 +264,14 @@ export async function handlePublicAdmissionSubmit(
       const isMissingTable =
         typeof dbMessage === 'string' &&
         (dbMessage.includes('public.admissions') || dbMessage.includes('schema cache'));
+      const isRlsViolation =
+        typeof dbMessage === 'string' &&
+        dbMessage.toLowerCase().includes('row-level security');
       const userMessage = isMissingTable
         ? `Could not save admission application: ${dbMessage}. Please run supabase/migrations/001_sofs_schema.sql in your Supabase SQL Editor.`
-        : `Could not save admission application: ${dbMessage}`;
+        : isRlsViolation
+          ? `Could not save admission application: ${dbMessage}. Verify SUPABASE_SERVICE_ROLE_KEY in Cloudflare Worker Secrets is a valid server secret key (sb_secret_... or service_role).`
+          : `Could not save admission application: ${dbMessage}`;
       const statusOut = restRes.status >= 400 && restRes.status < 500 ? restRes.status : 502;
       return jsonRes(
         {

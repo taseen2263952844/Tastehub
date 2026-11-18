@@ -573,16 +573,16 @@ CREATE POLICY "Public read hall of fame" ON public.exam_results FOR SELECT USING
 DROP POLICY IF EXISTS "Public read public resources" ON public.resources;
 CREATE POLICY "Public read public resources" ON public.resources FOR SELECT USING (is_published = true AND access_level = 'public');
 
--- Public Admission Submission (No login required, status locked to 'new')
+-- Admissions Security:
+-- Public admission submissions are accepted exclusively via the server-side Worker API
+-- (/api/sofs/admissions) using SUPABASE_SERVICE_ROLE_KEY (service_role / sb_secret_).
+-- Anonymous users cannot directly read, insert, update, or delete admissions.
 DROP POLICY IF EXISTS "Public insert admission" ON public.admissions;
-CREATE POLICY "Public insert admission" ON public.admissions
-  FOR INSERT
-  WITH CHECK (
-    status = 'new'
-    AND char_length(full_name) BETWEEN 2 AND 120
-    AND char_length(phone) BETWEEN 8 AND 24
-    AND char_length(desired_course) BETWEEN 2 AND 160
-  );
+DROP POLICY IF EXISTS "Admins manage admissions via verified JWT" ON public.admissions;
+CREATE POLICY "Admins manage admissions via verified JWT" ON public.admissions
+  FOR ALL
+  USING (public.is_sofs_admin(ARRAY['super_admin', 'admission_manager']))
+  WITH CHECK (public.is_sofs_admin(ARRAY['super_admin', 'admission_manager']));
 
 -- Student Private Policies (When Firebase JWT claims are verified by Supabase)
 DROP POLICY IF EXISTS "Student read own profile" ON public.students;

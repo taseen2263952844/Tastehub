@@ -72,7 +72,7 @@ export const AdminOverviewSection: React.FC<{ onNavigateModule: (mod: any) => vo
               Supabase SQL Editor and set <code className="font-mono">SUPABASE_URL</code>,{' '}
               <code className="font-mono">SUPABASE_SERVICE_ROLE_KEY</code>,{' '}
               <code className="font-mono">VITE_SUPABASE_URL</code>, and{' '}
-              <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> in Cloudflare Pages to
+              <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> in Cloudflare Worker Settings to
               enable live cloud persistence.
             </p>
           )}
