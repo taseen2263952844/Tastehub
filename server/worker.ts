@@ -38,8 +38,8 @@ function jsonError(message: string, status: number): Response {
 
 async function readBindingValue(raw: unknown): Promise<string | undefined> {
   if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+    const cleaned = raw.trim().replace(/^["']|["']$/g, '').trim();
+    return cleaned.length > 0 ? cleaned : undefined;
   }
   if (
     raw &&
@@ -49,8 +49,9 @@ async function readBindingValue(raw: unknown): Promise<string | undefined> {
   ) {
     try {
       const resolved = await (raw as WorkerSecretStoreBinding).get();
-      if (typeof resolved === 'string' && resolved.trim().length > 0) {
-        return resolved.trim();
+      if (typeof resolved === 'string') {
+        const cleaned = resolved.trim().replace(/^["']|["']$/g, '').trim();
+        if (cleaned.length > 0) return cleaned;
       }
     } catch {
       return undefined;
@@ -98,6 +99,11 @@ export default {
         return await handleSofsApiRequest(request, backendEnv);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unexpected server error.';
+        console.error('[SOFS Worker] Unhandled API route error', {
+          method: request.method,
+          pathname,
+          message,
+        });
         return jsonError(message, 500);
       }
     }

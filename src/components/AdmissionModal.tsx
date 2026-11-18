@@ -214,6 +214,10 @@ export const AdmissionApplicationForm: React.FC<AdmissionFormProps> = ({
                 {c.title}
               </option>
             ))}
+            {!courses.some((c) => c.title === desiredCourse) &&
+              desiredCourse !== 'Subject-Wise Coaching Inquiry' && (
+                <option value={desiredCourse}>{desiredCourse}</option>
+              )}
             <option value="Subject-Wise Coaching Inquiry">Subject-Wise Coaching Inquiry</option>
           </select>
         </div>

@@ -1272,6 +1272,13 @@ async function handleAdminWorkspace(req: Request, env: SofsBackendEnv): Promise<
     supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
   ]);
 
+  if (admissionsRes.error) {
+    console.error('[SOFS Admin] Failed loading admissions table', {
+      code: admissionsRes.error.code,
+      message: admissionsRes.error.message,
+    });
+  }
+
   const studentRows = studentsRes.data || [];
   const batchRows = batchesRes.data || [];
   const studentMap = new Map(studentRows.map((s: any) => [s.id, s]));

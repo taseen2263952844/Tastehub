@@ -45,14 +45,23 @@ export async function sofsApiFetch<T = any>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const token = await getCurrentUserIdToken(false);
+  let token: string | null = null;
+  try {
+    token = await getCurrentUserIdToken(false);
+  } catch (tokenErr) {
+    if (options.requireAuth) {
+      throw tokenErr;
+    }
+  }
+
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   } else if (options.requireAuth) {
     throw new Error('Please sign in to continue.');
   }
 
-  const response = await fetch(`/api/sofs/${path.replace(/^\/+/, '')}`, {
+  const endpoint = `/api/sofs/${path.replace(/^\/+/, '')}`;
+  const response = await fetch(endpoint, {
     method,
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -63,11 +72,14 @@ export async function sofsApiFetch<T = any>(
   try {
     parsed = text ? JSON.parse(text) : {};
   } catch {
+    console.error(`[SOFS API] ${method} ${endpoint} returned non-JSON HTTP ${response.status}`);
     throw new Error(`Unexpected server response (HTTP ${response.status}).`);
   }
 
   if (!response.ok || parsed.ok === false) {
-    throw new Error(parsed.message || `Request failed with HTTP ${response.status}.`);
+    const errMsg = parsed.message || `Request failed with HTTP ${response.status}.`;
+    console.error(`[SOFS API] ${method} ${endpoint} failed (HTTP ${response.status}): ${errMsg}`);
+    throw new Error(errMsg);
   }
 
   return parsed as T;

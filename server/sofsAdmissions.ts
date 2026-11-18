@@ -26,8 +26,9 @@ function jsonRes(body: unknown, status = 200, extraHeaders?: Record<string, stri
 
 function getEnv(env: SofsAdmissionEnv | undefined, key: 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'): string {
   const boundVal = env?.[key];
-  if (typeof boundVal === 'string' && boundVal.trim().length > 0) {
-    return boundVal.trim();
+  if (typeof boundVal === 'string') {
+    const cleaned = boundVal.trim().replace(/^["']|["']$/g, '').trim();
+    if (cleaned.length > 0) return cleaned;
   }
   return '';
 }
@@ -159,30 +160,35 @@ export async function handlePublicAdmissionSubmit(
   const message = String(payload.message || '').trim();
 
   if (fullName.length < 2 || fullName.length > 120) {
+    console.warn('[SOFS Admissions] Validation rejected', { field: 'fullName', status: 400 });
     return jsonRes(
       { ok: false, status: 400, message: 'Full Name must be between 2 and 120 characters.' },
       400
     );
   }
   if (!/^[+0-9\s()-]{8,24}$/.test(phone)) {
+    console.warn('[SOFS Admissions] Validation rejected', { field: 'phone', status: 400 });
     return jsonRes(
       { ok: false, status: 400, message: 'Please provide a valid mobile phone number.' },
       400
     );
   }
   if (academicLevel.length < 2 || academicLevel.length > 60) {
+    console.warn('[SOFS Admissions] Validation rejected', { field: 'academicLevel', status: 400 });
     return jsonRes(
       { ok: false, status: 400, message: 'Please select a valid Class / Academic Level.' },
       400
     );
   }
   if (desiredCourse.length < 2 || desiredCourse.length > 160) {
+    console.warn('[SOFS Admissions] Validation rejected', { field: 'desiredCourse', status: 400 });
     return jsonRes(
       { ok: false, status: 400, message: 'Please select a Desired Course or Subject.' },
       400
     );
   }
   if (message.length > 1500) {
+    console.warn('[SOFS Admissions] Validation rejected', { field: 'message', status: 400 });
     return jsonRes(
       { ok: false, status: 400, message: 'Message is too long (maximum 1500 characters).' },
       400
@@ -197,6 +203,7 @@ export async function handlePublicAdmissionSubmit(
     const missing: string[] = [];
     if (!supabaseUrl) missing.push('SUPABASE_URL');
     if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+    console.error('[SOFS Admissions] Missing runtime bindings', { missing, status: 503 });
     return jsonRes(
       {
         ok: false,
@@ -209,6 +216,10 @@ export async function handlePublicAdmissionSubmit(
 
   const keyType = detectSupabaseKeyType(serviceRoleKey);
   if (keyType === 'publishable' || keyType === 'anon_jwt') {
+    console.error('[SOFS Admissions] Invalid public key configured as service role key', {
+      keyType,
+      status: 500,
+    });
     return jsonRes(
       {
         ok: false,
@@ -221,6 +232,12 @@ export async function handlePublicAdmissionSubmit(
   }
 
   const referenceCode = `SOFS-ADM-${Math.floor(100000 + Math.random() * 900000)}`;
+  let supabaseHost = 'unknown';
+  try {
+    supabaseHost = new URL(supabaseUrl).host;
+  } catch {
+    // ignore
+  }
 
   try {
     const restRes = await fetch(`${supabaseUrl}/rest/v1/admissions`, {
@@ -252,6 +269,13 @@ export async function handlePublicAdmissionSubmit(
       const dbMessage =
         (parsed && (parsed.message || parsed.error || parsed.details)) ||
         `Supabase rejected the admission record (HTTP ${restRes.status}).`;
+      console.error('[SOFS Admissions] Supabase insert rejected', {
+        httpStatus: restRes.status,
+        pgCode: parsed?.code || null,
+        supabaseHost,
+        keyType,
+        dbMessage,
+      });
       const isMissingTable =
         typeof dbMessage === 'string' &&
         (dbMessage.includes('public.admissions') || dbMessage.includes('schema cache'));
@@ -276,6 +300,10 @@ export async function handlePublicAdmissionSubmit(
 
     const row = Array.isArray(parsed) ? parsed[0] : parsed;
     if (!row || !row.id) {
+      console.error('[SOFS Admissions] Supabase returned empty row after POST', {
+        httpStatus: restRes.status,
+        supabaseHost,
+      });
       return jsonRes(
         {
           ok: false,
@@ -285,6 +313,12 @@ export async function handlePublicAdmissionSubmit(
         502
       );
     }
+
+    console.info('[SOFS Admissions] Record persisted to Supabase', {
+      id: row.id,
+      referenceCode: row.reference_code,
+      supabaseHost,
+    });
 
     return jsonRes(
       {
@@ -308,6 +342,10 @@ export async function handlePublicAdmissionSubmit(
       201
     );
   } catch (err: any) {
+    console.error('[SOFS Admissions] Network failure reaching Supabase', {
+      supabaseHost,
+      error: err?.message || 'Network error',
+    });
     return jsonRes(
       {
         ok: false,
