@@ -59,8 +59,9 @@ function errorResponse(message: string, status = 400, extra?: Record<string, unk
 function getEnvValue(env: SofsBackendEnv | undefined, ...keys: string[]): string {
   for (const key of keys) {
     const val = env?.[key];
-    if (typeof val === 'string' && val.trim().length > 0) {
-      return val.trim();
+    if (typeof val === 'string') {
+      const cleaned = val.trim().replace(/^["']|["']$/g, '').trim();
+      if (cleaned.length > 0) return cleaned;
     }
   }
   return '';
@@ -121,6 +122,9 @@ function createServiceSupabase(env: SofsBackendEnv): SupabaseClient | null {
           headers.delete('Authorization');
           headers.delete('authorization');
         }
+        if (input instanceof Request) {
+          return fetch(new Request(input, { ...init, headers }));
+        }
         return fetch(input, { ...init, headers });
       }
     : undefined;
@@ -152,7 +156,10 @@ async function verifyFirebaseIdToken(
       }
     );
 
-    if (!lookupRes.ok) return null;
+    if (!lookupRes.ok) {
+      console.warn('[SOFS Auth] Firebase token verification failed', { status: lookupRes.status });
+      return null;
+    }
     const data = (await lookupRes.json()) as {
       users?: Array<{
         localId?: string;
@@ -173,7 +180,10 @@ async function verifyFirebaseIdToken(
       displayName: account.displayName || account.email.split('@')[0],
       photoUrl: account.photoUrl || '',
     };
-  } catch {
+  } catch (err: any) {
+    console.error('[SOFS Auth] Firebase lookup network error', {
+      message: err?.message || 'Network error',
+    });
     return null;
   }
 }
@@ -183,11 +193,19 @@ async function resolveAdminRole(
   supabase: SupabaseClient | null
 ): Promise<VerifiedAdmin | null> {
   if (supabase) {
-    const { data: byUid } = await supabase
+    const { data: byUid, error: byUidErr } = await supabase
       .from('admin_users')
       .select('id, email, full_name, role, is_active, firebase_uid')
       .eq('firebase_uid', user.uid)
       .maybeSingle();
+
+    if (byUidErr) {
+      console.error('[SOFS Auth] Supabase admin_users uid lookup failed', {
+        code: byUidErr.code,
+        message: byUidErr.message,
+      });
+      throw new Error(`Admin role verification failed: ${byUidErr.message}`);
+    }
 
     if (byUid) {
       if (!byUid.is_active) return null;
@@ -198,11 +216,19 @@ async function resolveAdminRole(
       };
     }
 
-    const { data: byEmail } = await supabase
+    const { data: byEmail, error: byEmailErr } = await supabase
       .from('admin_users')
       .select('id, email, full_name, role, is_active, firebase_uid')
       .ilike('email', user.email)
       .maybeSingle();
+
+    if (byEmailErr) {
+      console.error('[SOFS Auth] Supabase admin_users email lookup failed', {
+        code: byEmailErr.code,
+        message: byEmailErr.message,
+      });
+      throw new Error(`Admin role verification failed: ${byEmailErr.message}`);
+    }
 
     if (byEmail) {
       if (!byEmail.is_active) return null;
@@ -1201,12 +1227,143 @@ async function handleStudentExamAction(
   });
 }
 
+function mapAdmissionRow(a: any) {
+  return {
+    id: a.id,
+    referenceCode: a.reference_code,
+    fullName: a.full_name,
+    phone: a.phone,
+    whatsapp: a.whatsapp || '',
+    academicLevel: a.academic_level,
+    academicGroup: a.academic_group,
+    desiredCourse: a.desired_course,
+    preferredBatch: a.preferred_batch || '',
+    message: a.message || '',
+    status: a.status,
+    staffNotes: a.staff_notes || '',
+    handledBy: a.handled_by || '',
+    createdAt: a.created_at,
+  };
+}
+
+async function handleAdminAdmissions(req: Request, env: SofsBackendEnv): Promise<Response> {
+  const user = await verifyFirebaseIdToken(req, env);
+  if (!user) return errorResponse('Authentication required. Please sign in as an admin.', 401);
+
+  let supabase: SupabaseClient | null = null;
+  try {
+    supabase = createServiceSupabase(env);
+  } catch (err: any) {
+    console.error('[SOFS Admin Admissions] Supabase client init error', {
+      message: err?.message || 'Configuration error',
+    });
+    return errorResponse(err?.message || 'Server Supabase configuration error.', 500);
+  }
+
+  let admin: VerifiedAdmin | null = null;
+  try {
+    admin = await resolveAdminRole(user, supabase);
+  } catch (err: any) {
+    return errorResponse(err?.message || 'Failed verifying admin permissions in Supabase.', 502);
+  }
+
+  if (!admin || !canRoleManageEntity(admin.role, 'admissions')) {
+    console.warn('[SOFS Admin Admissions] Unauthorized access attempt blocked', {
+      hasAdminRecord: Boolean(admin),
+      role: admin?.role || null,
+    });
+    return errorResponse('Forbidden: super_admin or admission_manager role required.', 403);
+  }
+
+  if (!supabase) {
+    return errorResponse(
+      'Admissions database is not configured on the server. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Cloudflare Worker settings.',
+      503
+    );
+  }
+
+  const url = new URL(req.url);
+  const statusParam = String(url.searchParams.get('status') || 'all').trim();
+  const allowedStatuses = new Set(['new', 'contacted', 'counseling', 'admitted', 'archived']);
+  const searchRaw = String(url.searchParams.get('search') || '').trim();
+  const page = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1);
+  const pageSize = Math.min(
+    100,
+    Math.max(1, Number.parseInt(url.searchParams.get('pageSize') || '50', 10) || 50)
+  );
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from('admissions')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (statusParam !== 'all' && allowedStatuses.has(statusParam)) {
+    query = query.eq('status', statusParam);
+  }
+
+  if (searchRaw.length > 0) {
+    const safeTerm = searchRaw.replace(/[%_,()]/g, ' ').trim();
+    if (safeTerm.length > 0) {
+      const pattern = `%${safeTerm}%`;
+      query = query.or(
+        `full_name.ilike.${pattern},phone.ilike.${pattern},reference_code.ilike.${pattern},desired_course.ilike.${pattern}`
+      );
+    }
+  }
+
+  const { data, error, count } = await query.range(from, to);
+
+  if (error) {
+    console.error('[SOFS Admin Admissions] Supabase query failed', {
+      code: error.code,
+      message: error.message,
+      page,
+      pageSize,
+    });
+    return errorResponse(`Could not retrieve admissions from Supabase: ${error.message}`, 502);
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const totalCount = typeof count === 'number' ? count : rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  console.info('[SOFS Admin Admissions] Retrieved admissions', {
+    returnedCount: rows.length,
+    totalCount,
+    page,
+    status: statusParam,
+  });
+
+  return jsonResponse({
+    ok: true,
+    supabaseConfigured: true,
+    admissions: rows.map(mapAdmissionRow),
+    totalCount,
+    page,
+    pageSize,
+    totalPages,
+  });
+}
+
 async function handleAdminWorkspace(req: Request, env: SofsBackendEnv): Promise<Response> {
   const user = await verifyFirebaseIdToken(req, env);
   if (!user) return errorResponse('Authentication required.', 401);
 
-  const supabase = createServiceSupabase(env);
-  const admin = await resolveAdminRole(user, supabase);
+  let supabase: SupabaseClient | null = null;
+  try {
+    supabase = createServiceSupabase(env);
+  } catch (err: any) {
+    return errorResponse(err?.message || 'Server Supabase configuration error.', 500);
+  }
+
+  let admin: VerifiedAdmin | null = null;
+  try {
+    admin = await resolveAdminRole(user, supabase);
+  } catch (err: any) {
+    return errorResponse(err?.message || 'Failed verifying admin permissions in Supabase.', 502);
+  }
   if (!admin) return errorResponse('Forbidden: active SOFS admin role required.', 403);
 
   if (!supabase) {
@@ -1352,22 +1509,8 @@ async function handleAdminWorkspace(req: Request, env: SofsBackendEnv): Promise<
       status: e.status,
       enrolledAt: e.enrolled_at,
     })),
-    admissions: (admissionsRes.data || []).map((a: any) => ({
-      id: a.id,
-      referenceCode: a.reference_code,
-      fullName: a.full_name,
-      phone: a.phone,
-      whatsapp: a.whatsapp || '',
-      academicLevel: a.academic_level,
-      academicGroup: a.academic_group,
-      desiredCourse: a.desired_course,
-      preferredBatch: a.preferred_batch || '',
-      message: a.message || '',
-      status: a.status,
-      staffNotes: a.staff_notes || '',
-      handledBy: a.handled_by || '',
-      createdAt: a.created_at,
-    })),
+    admissions: (admissionsRes.data || []).map(mapAdmissionRow),
+    admissionsError: admissionsRes.error ? admissionsRes.error.message : null,
     questionCategories: (qCatsRes.data || []).map((c: any) => ({
       id: c.id,
       name: c.name,
@@ -1914,11 +2057,31 @@ async function handleAdminMutate(req: Request, env: SofsBackendEnv): Promise<Res
 
   if (!rowToSave) return errorResponse('No update payload built.', 400);
 
-  const { data: saved, error } = await supabase
-    .from(entity)
-    .upsert(rowToSave, entity === 'admin_users' && !d.id ? { onConflict: 'email' } : undefined)
-    .select('*')
-    .single();
+  let saved: any = null;
+  let error: any = null;
+  if (entity === 'admissions') {
+    if (!d.id) return errorResponse('Admission record ID is required for updates.', 400);
+    const updateRes = await supabase
+      .from('admissions')
+      .update({
+        status: d.status,
+        staff_notes: d.staffNotes || '',
+        handled_by: admin.user.email,
+      })
+      .eq('id', d.id)
+      .select('*')
+      .single();
+    saved = updateRes.data ? mapAdmissionRow(updateRes.data) : null;
+    error = updateRes.error;
+  } else {
+    const upsertRes = await supabase
+      .from(entity)
+      .upsert(rowToSave, entity === 'admin_users' && !d.id ? { onConflict: 'email' } : undefined)
+      .select('*')
+      .single();
+    saved = upsertRes.data;
+    error = upsertRes.error;
+  }
 
   if (error) return errorResponse(error.message, 500);
 
@@ -2286,6 +2449,9 @@ export async function handleSofsApiRequest(req: Request, env: SofsBackendEnv): P
     return jsonResponse({ ok: true, ticket: newTicket });
   }
 
+  if (route === 'admin/admissions' && req.method === 'GET') {
+    return handleAdminAdmissions(req, env);
+  }
   if (route === 'admin/workspace' && req.method === 'GET') {
     return handleAdminWorkspace(req, env);
   }

@@ -145,6 +145,11 @@ interface AppContextValue {
   currentStudent: StudentProfile | null;
   enrollments: Enrollment[];
   admissions: AdmissionApplication[];
+  adminAdmissionsLoading: boolean;
+  adminAdmissionsError: string | null;
+  adminAdmissionsTotal: number;
+  adminAdmissionsPage: number;
+  adminAdmissionsTotalPages: number;
   questionCategories: QuestionCategory[];
   questions: Question[];
   exams: Exam[];
@@ -189,6 +194,12 @@ interface AppContextValue {
   updateSupportTicketStatus: (ticketId: string, status: SupportTicket['status']) => Promise<void>;
   adminUpsert: (entity: string, data: Record<string, any>) => Promise<void>;
   adminDelete: (entity: string, id: string) => Promise<void>;
+  fetchAdminAdmissions: (opts?: {
+    page?: number;
+    pageSize?: number;
+    status?: string;
+    search?: string;
+  }) => Promise<void>;
   uploadMediaAsset: (file: File, bucket: string) => Promise<MediaAsset>;
   extractQuestionsWithGemini: (file: File, subjectHint: string) => Promise<Partial<Question>[]>;
 }
@@ -229,6 +240,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [supabaseConfigured, setSupabaseConfigured] = useState(false);
   const [geminiConfigured, setGeminiConfigured] = useState(false);
   const [syncingBackend, setSyncingBackend] = useState(false);
+  const [adminAdmissionsLoading, setAdminAdmissionsLoading] = useState(false);
+  const [adminAdmissionsError, setAdminAdmissionsError] = useState<string | null>(null);
+  const [adminAdmissionsTotal, setAdminAdmissionsTotal] = useState(0);
+  const [adminAdmissionsPage, setAdminAdmissionsPage] = useState(1);
+  const [adminAdmissionsTotalPages, setAdminAdmissionsTotalPages] = useState(1);
 
   const cached = useMemo(() => loadLocalFallbackState(), []);
 
@@ -409,6 +425,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [adminRole]
   );
 
+  const fetchAdminAdmissions = useCallback(
+    async (opts?: { page?: number; pageSize?: number; status?: string; search?: string }) => {
+      if (!authUser) return;
+      setAdminAdmissionsLoading(true);
+      setAdminAdmissionsError(null);
+      try {
+        const params = new URLSearchParams();
+        if (opts?.page && opts.page > 0) params.set('page', String(opts.page));
+        if (opts?.pageSize && opts.pageSize > 0) params.set('pageSize', String(opts.pageSize));
+        if (opts?.status && opts.status !== 'all') params.set('status', opts.status);
+        if (opts?.search && opts.search.trim().length > 0) params.set('search', opts.search.trim());
+        const queryStr = params.toString();
+        const res = await sofsApiFetch<{
+          ok: boolean;
+          supabaseConfigured: boolean;
+          admissions: AdmissionApplication[];
+          totalCount: number;
+          page: number;
+          pageSize: number;
+          totalPages: number;
+        }>(`admin/admissions${queryStr ? `?${queryStr}` : ''}`, { requireAuth: true });
+
+        if (res.supabaseConfigured && Array.isArray(res.admissions)) {
+          setAdmissions(res.admissions);
+          setAdminAdmissionsTotal(
+            typeof res.totalCount === 'number' ? res.totalCount : res.admissions.length
+          );
+          setAdminAdmissionsPage(res.page || 1);
+          setAdminAdmissionsTotalPages(res.totalPages || 1);
+        }
+      } catch (err: any) {
+        const message = err?.message || 'Failed to load admission records from Supabase.';
+        setAdminAdmissionsError(message);
+      } finally {
+        setAdminAdmissionsLoading(false);
+      }
+    },
+    [authUser]
+  );
+
   const refreshBackendData = useCallback(async () => {
     setSyncingBackend(true);
     try {
@@ -433,16 +489,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (pub.publicResources) setResources(pub.publicResources);
       }
 
-      if (authUser) {
+      if (!authUser) {
+        if (health.supabaseConfigured) {
+          setAdmissions([]);
+          setAdminAdmissionsTotal(0);
+          setAdminAdmissionsError(null);
+        }
+        return;
+      }
+
+      let resolvedAdminRole: AdminRole | null = null;
+      const localAdm = adminUsers.find(
+        (a) => a.email.toLowerCase() === authUser.email.toLowerCase() && a.isActive
+      );
+
+      try {
         const stuRes = await sofsApiFetch<any>('student/dashboard', { requireAuth: true });
         if (stuRes.adminRole) {
+          resolvedAdminRole = stuRes.adminRole;
           setAdminRole(stuRes.adminRole);
+        } else if (localAdm) {
+          resolvedAdminRole = localAdm.role;
+          setAdminRole(localAdm.role);
         } else {
-          // Check local fallback admin registry when running without Supabase env
-          const localAdm = adminUsers.find(
-            (a) => a.email.toLowerCase() === authUser.email.toLowerCase() && a.isActive
-          );
-          setAdminRole(localAdm ? localAdm.role : null);
+          setAdminRole(null);
         }
 
         if (stuRes.supabaseConfigured) {
@@ -462,11 +532,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (stuRes.notifications) setNotifications(stuRes.notifications);
           if (stuRes.tickets) setTickets(stuRes.tickets);
         }
+      } catch (stuErr) {
+        console.error('[SOFS AppContext] Student dashboard sync error:', stuErr);
+        resolvedAdminRole = adminRole || localAdm?.role || null;
+      }
 
-        // If user has an admin role and Supabase is configured, load full admin workspace
-        if ((stuRes.adminRole || adminRole) && stuRes.supabaseConfigured) {
+      // If user has an admin role and Supabase is configured, load full admin workspace
+      const effectiveRole = resolvedAdminRole || adminRole;
+      if (effectiveRole && health.supabaseConfigured) {
+        setAdminAdmissionsLoading(true);
+        setAdminAdmissionsError(null);
+        try {
           const admRes = await sofsApiFetch<any>('admin/workspace', { requireAuth: true });
           if (admRes.supabaseConfigured) {
+            if (admRes.adminRole) setAdminRole(admRes.adminRole);
             if (admRes.siteSettings) setSiteSettings(admRes.siteSettings);
             if (admRes.adminUsers) setAdminUsers(admRes.adminUsers);
             if (admRes.teachers) setTeachers(admRes.teachers);
@@ -476,7 +555,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (admRes.schedules) setSchedules(admRes.schedules);
             if (admRes.students) setStudents(admRes.students);
             if (admRes.enrollments) setEnrollments(admRes.enrollments);
-            if (admRes.admissions) setAdmissions(admRes.admissions);
+            if (admRes.admissionsError) {
+              setAdminAdmissionsError(admRes.admissionsError);
+            } else if (Array.isArray(admRes.admissions)) {
+              setAdmissions(admRes.admissions);
+              setAdminAdmissionsTotal(admRes.admissions.length);
+              setAdminAdmissionsPage(1);
+              setAdminAdmissionsTotalPages(1);
+            }
             if (admRes.questionCategories) setQuestionCategories(admRes.questionCategories);
             if (admRes.questions) setQuestions(admRes.questions);
             if (admRes.exams) setExams(admRes.exams);
@@ -490,10 +576,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (admRes.mediaAssets) setMediaAssets(admRes.mediaAssets);
             if (admRes.auditLogs) setAuditLogs(admRes.auditLogs);
           }
+        } catch (admErr: any) {
+          setAdminAdmissionsError(
+            admErr?.message || 'Failed loading admin workspace admissions from Supabase.'
+          );
+        } finally {
+          setAdminAdmissionsLoading(false);
         }
       }
-    } catch {
-      // Initial load stays resilient with seed state if API unreachable
+    } catch (err) {
+      console.error('[SOFS AppContext] Backend bootstrap failed:', err);
     } finally {
       setSyncingBackend(false);
     }
@@ -1259,6 +1351,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentStudent,
         enrollments,
         admissions,
+        adminAdmissionsLoading,
+        adminAdmissionsError,
+        adminAdmissionsTotal,
+        adminAdmissionsPage,
+        adminAdmissionsTotalPages,
         questionCategories,
         questions,
         exams,
@@ -1284,6 +1381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateSupportTicketStatus,
         adminUpsert,
         adminDelete,
+        fetchAdminAdmissions,
         uploadMediaAsset,
         extractQuestionsWithGemini,
       }}
