@@ -881,20 +881,7 @@ async function handleStudentDashboard(req: Request, env: SofsBackendEnv): Promis
     })),
     exams: eligibleExamsRaw.map((ex: any) => mapExam(ex, examQuestionsMap.get(ex.id) || [])),
     questions: sanitizedQuestions,
-    attempts: attempts.map((a: any) => ({
-      id: a.id,
-      examId: a.exam_id,
-      studentId: a.student_id,
-      questionOrder: a.question_order || [],
-      optionOrders: a.option_orders || {},
-      autosavedAnswers: a.autosaved_answers || {},
-      answers: answersByAttempt.get(a.id) || [],
-      startedAt: a.started_at,
-      expiresAt: a.expires_at,
-      lastSavedAt: a.last_saved_at,
-      submittedAt: a.submitted_at || undefined,
-      status: a.status,
-    })),
+    attempts: attempts.map((a: any) => mapExamAttemptRow(a, answersByAttempt.get(a.id) || [])),
     results: (resultsRes.data || []).map((r: any) => mapResult(r)),
     resources,
     notices,
@@ -922,184 +909,68 @@ async function handleStudentDashboard(req: Request, env: SofsBackendEnv): Promis
   });
 }
 
-async function handleStudentExamAction(
-  req: Request,
-  env: SofsBackendEnv,
-  subAction: 'start' | 'autosave' | 'submit'
-): Promise<Response> {
-  const user = await verifyFirebaseIdToken(req, env);
-  if (!user) return errorResponse('Authentication required.', 401);
+type ExamSubmissionReason = 'normal' | 'fullscreen_violation' | 'time_expired';
 
-  const supabase = createServiceSupabase(env);
-  if (!supabase) {
-    return errorResponse('Supabase backend is not configured for server exam enforcement.', 503);
-  }
+function mapExamAttemptRow(a: any, answers: any[] = []) {
+  const submissionReason: ExamSubmissionReason =
+    a.submission_reason === 'fullscreen_violation' || a.submission_reason === 'time_expired'
+      ? a.submission_reason
+      : a.violation_timestamp
+      ? 'fullscreen_violation'
+      : a.status === 'auto_submitted'
+      ? 'time_expired'
+      : 'normal';
 
-  let body: Record<string, any>;
-  try {
-    body = (await req.json()) as Record<string, any>;
-  } catch {
-    return errorResponse('Invalid JSON payload.', 400);
-  }
+  return {
+    id: a.id,
+    examId: a.exam_id,
+    studentId: a.student_id,
+    questionOrder: a.question_order || [],
+    optionOrders: a.option_orders || {},
+    autosavedAnswers: a.autosaved_answers || {},
+    answers,
+    startedAt: a.started_at,
+    expiresAt: a.expires_at,
+    lastSavedAt: a.last_saved_at,
+    submittedAt: a.submitted_at || undefined,
+    status: a.status,
+    submissionReason,
+    violationReason: a.violation_reason || '',
+    violationTimestamp: a.violation_timestamp || undefined,
+  };
+}
 
-  const student = await ensureStudentRecord(supabase, user);
+function isMissingExamLockColumnError(err: any): boolean {
+  const msg = String(err?.message || '').toLowerCase();
+  const code = String(err?.code || '');
+  return (
+    code === '42703' ||
+    msg.includes('submission_reason') ||
+    msg.includes('violation_reason') ||
+    msg.includes('violation_timestamp')
+  );
+}
 
-  if (subAction === 'start') {
-    const examId = String(body.examId || '');
-    if (!examId) return errorResponse('examId is required.', 400);
-
-    const { data: exam } = await supabase.from('exams').select('*').eq('id', examId).maybeSingle();
-    if (!exam || !exam.is_published) return errorResponse('Exam is unavailable.', 404);
-
-    // Check existing attempt first (supports resume after disconnect)
-    const { data: existingAttempt } = await supabase
-      .from('exam_attempts')
-      .select('*')
-      .eq('exam_id', examId)
-      .eq('student_id', student.id)
-      .maybeSingle();
-
-    const { data: eqRows } = await supabase
-      .from('exam_questions')
-      .select('question_id, sort_order')
-      .eq('exam_id', examId)
-      .order('sort_order');
-
-    const questionIds = (eqRows || []).map((r: any) => r.question_id);
-    const { data: qRows } = questionIds.length
-      ? await supabase.from('questions').select('*').in('id', questionIds)
-      : { data: [] };
-
-    if (existingAttempt) {
-      return jsonResponse({
-        ok: true,
-        attempt: {
-          id: existingAttempt.id,
-          examId: existingAttempt.exam_id,
-          studentId: existingAttempt.student_id,
-          questionOrder: existingAttempt.question_order,
-          optionOrders: existingAttempt.option_orders,
-          autosavedAnswers: existingAttempt.autosaved_answers || {},
-          answers: [],
-          startedAt: existingAttempt.started_at,
-          expiresAt: existingAttempt.expires_at,
-          lastSavedAt: existingAttempt.last_saved_at,
-          submittedAt: existingAttempt.submitted_at,
-          status: existingAttempt.status,
-        },
-        // Never leak answer keys during active/locked exam
-        questions: (qRows || []).map((q: any) =>
-          mapQuestion(q, Boolean(exam.results_published && exam.allow_answer_review))
-        ),
-      });
-    }
-
-    const nowMs = Date.now();
-    const startsMs = new Date(exam.starts_at).getTime();
-    const endsMs = new Date(exam.ends_at).getTime();
-    if (nowMs < startsMs) {
-      return errorResponse('This exam has not opened yet.', 403);
-    }
-    if (nowMs > endsMs) {
-      return errorResponse('The exam submission window has already closed.', 403);
-    }
-
-    const orderedQIds = exam.randomize_questions ? shuffleArray(questionIds) : questionIds;
-    const optionOrders: Record<string, string[]> = {};
-    (qRows || []).forEach((q: any) => {
-      const keys = Array.isArray(q.options) ? q.options.map((o: any) => String(o.key)) : [];
-      optionOrders[q.id] = exam.randomize_options ? shuffleArray(keys) : keys;
-    });
-
-    const durationMs = Number(exam.duration_minutes || 30) * 60 * 1000;
-    const expiresAt = new Date(Math.min(nowMs + durationMs, endsMs)).toISOString();
-
-    const { data: createdAttempt, error: insErr } = await supabase
-      .from('exam_attempts')
-      .insert({
-        exam_id: examId,
-        student_id: student.id,
-        question_order: orderedQIds,
-        option_orders: optionOrders,
-        autosaved_answers: {},
-        expires_at: expiresAt,
-        status: 'in_progress',
-      })
-      .select('*')
-      .single();
-
-    if (insErr) return errorResponse(insErr.message, 500);
-
-    return jsonResponse({
-      ok: true,
-      attempt: {
-        id: createdAttempt.id,
-        examId: createdAttempt.exam_id,
-        studentId: createdAttempt.student_id,
-        questionOrder: createdAttempt.question_order,
-        optionOrders: createdAttempt.option_orders,
-        autosavedAnswers: {},
-        answers: [],
-        startedAt: createdAttempt.started_at,
-        expiresAt: createdAttempt.expires_at,
-        lastSavedAt: createdAttempt.last_saved_at,
-        status: createdAttempt.status,
-      },
-      questions: (qRows || []).map((q: any) => mapQuestion(q, false)),
-    });
-  }
-
-  if (subAction === 'autosave') {
-    const attemptId = String(body.attemptId || '');
-    const autosavedAnswers = body.autosavedAnswers || {};
-    if (!attemptId) return errorResponse('attemptId is required.', 400);
-
-    const { data: attempt } = await supabase
-      .from('exam_attempts')
-      .select('id, student_id, status')
-      .eq('id', attemptId)
-      .maybeSingle();
-
-    if (!attempt || attempt.student_id !== student.id) {
-      return errorResponse('Attempt not found.', 404);
-    }
-    if (attempt.status !== 'in_progress') {
-      return errorResponse('Exam attempt is already submitted.', 409);
-    }
-
-    await supabase
-      .from('exam_attempts')
-      .update({
-        autosaved_answers: autosavedAnswers,
-        last_saved_at: new Date().toISOString(),
-      })
-      .eq('id', attemptId);
-
-    return jsonResponse({ ok: true, lastSavedAt: new Date().toISOString() });
-  }
-
-  // submit
-  const attemptId = String(body.attemptId || '');
-  const submittedAnswers = (body.answers || {}) as Record<
+async function finalizeExamAttemptSubmission(
+  supabase: SupabaseClient,
+  attempt: any,
+  studentId: string,
+  submittedAnswers: Record<
     string,
     { selectedOption?: string; writtenText?: string; attachmentUrl?: string }
-  >;
-  const autoSubmitted = Boolean(body.autoSubmitted);
-
-  const { data: attempt } = await supabase
-    .from('exam_attempts')
+  >,
+  opts: {
+    autoSubmitted: boolean;
+    submissionReason: ExamSubmissionReason;
+    violationReason?: string;
+    violationTimestamp?: string;
+  }
+) {
+  const { data: exam } = await supabase
+    .from('exams')
     .select('*')
-    .eq('id', attemptId)
-    .maybeSingle();
-
-  if (!attempt || attempt.student_id !== student.id) {
-    return errorResponse('Exam attempt not found.', 404);
-  }
-  if (attempt.status !== 'in_progress') {
-    return errorResponse('This exam attempt has already been submitted.', 409);
-  }
-
-  const { data: exam } = await supabase.from('exams').select('*').eq('id', attempt.exam_id).single();
+    .eq('id', attempt.exam_id)
+    .single();
   const { data: eqRows } = await supabase
     .from('exam_questions')
     .select('question_id, marks_override')
@@ -1169,27 +1040,80 @@ async function handleStudentExamAction(
       .upsert(answerRecords, { onConflict: 'attempt_id,question_id' });
   }
 
-  const finalStatus = autoSubmitted ? 'auto_submitted' : 'submitted';
+  const finalReason: ExamSubmissionReason =
+    opts.submissionReason === 'fullscreen_violation'
+      ? 'fullscreen_violation'
+      : opts.submissionReason === 'time_expired' || opts.autoSubmitted
+      ? 'time_expired'
+      : 'normal';
+  const finalStatus =
+    finalReason !== 'normal' || opts.autoSubmitted ? 'auto_submitted' : 'submitted';
   const submittedAt = new Date().toISOString();
-  await supabase
+  const finalViolationReason =
+    finalReason === 'fullscreen_violation'
+      ? String(opts.violationReason || attempt.violation_reason || 'Exited fullscreen mode').slice(0, 240)
+      : attempt.violation_reason || '';
+  const finalViolationTimestamp =
+    finalReason === 'fullscreen_violation'
+      ? attempt.violation_timestamp || opts.violationTimestamp || submittedAt
+      : attempt.violation_timestamp || null;
+
+  const fullUpdatePayload: Record<string, any> = {
+    autosaved_answers: submittedAnswers,
+    submitted_at: submittedAt,
+    last_saved_at: submittedAt,
+    status: finalStatus,
+    submission_reason: finalReason,
+    violation_reason: finalViolationReason,
+    violation_timestamp: finalViolationTimestamp,
+  };
+
+  let { data: updatedAttempt, error: updErr } = await supabase
     .from('exam_attempts')
-    .update({
-      autosaved_answers: submittedAnswers,
-      submitted_at: submittedAt,
-      last_saved_at: submittedAt,
-      status: finalStatus,
-    })
-    .eq('id', attempt.id);
+    .update(fullUpdatePayload)
+    .eq('id', attempt.id)
+    .eq('status', 'in_progress')
+    .select('*')
+    .maybeSingle();
+
+  if (updErr && isMissingExamLockColumnError(updErr)) {
+    console.warn('[SOFS Exam] 003_exam_fullscreen_lock.sql columns missing; saving core attempt fields.');
+    const retry = await supabase
+      .from('exam_attempts')
+      .update({
+        autosaved_answers: submittedAnswers,
+        submitted_at: submittedAt,
+        last_saved_at: submittedAt,
+        status: finalStatus,
+      })
+      .eq('id', attempt.id)
+      .eq('status', 'in_progress')
+      .select('*')
+      .maybeSingle();
+    updatedAttempt = retry.data;
+    updErr = retry.error;
+  }
+
+  if (updErr) {
+    throw new Error(updErr.message || 'Failed to finalize exam submission.');
+  }
+
+  if (!updatedAttempt) {
+    return { alreadySubmitted: true as const };
+  }
 
   const obtainedMarks = Math.max(0, Number((mcqMarks - negativeDeducted).toFixed(2)));
   const denom = Number(exam.total_marks || totalMarks || 1);
-  const percentage = Math.max(0, Math.min(100, Number(((obtainedMarks / denom) * 100).toFixed(2))));
+  const percentage = Math.max(
+    0,
+    Math.min(100, Number(((obtainedMarks / denom) * 100).toFixed(2)))
+  );
   const { letterGrade, gpa } = computeLetterGradeAndGpa(percentage);
 
   const { data: enrollment } = await supabase
     .from('enrollments')
     .select('batch_id')
-    .eq('student_id', student.id)
+    .eq('student_id', studentId)
     .eq('status', 'active')
     .limit(1)
     .maybeSingle();
@@ -1200,7 +1124,7 @@ async function handleStudentExamAction(
       {
         exam_id: exam.id,
         attempt_id: attempt.id,
-        student_id: student.id,
+        student_id: studentId,
         batch_id: enrollment?.batch_id || null,
         total_marks: denom,
         obtained_marks: obtainedMarks,
@@ -1218,12 +1142,288 @@ async function handleStudentExamAction(
     .select('*')
     .single();
 
-  return jsonResponse({
-    ok: true,
+  return {
+    alreadySubmitted: false as const,
+    updatedAttempt,
     status: finalStatus,
+    submissionReason: finalReason,
+    violationReason: finalViolationReason,
+    violationTimestamp: finalViolationTimestamp || undefined,
     submittedAt,
     resultPublished: Boolean(exam.results_published),
     result: exam.results_published && resultRow ? mapResult(resultRow) : null,
+  };
+}
+
+async function handleStudentExamAction(
+  req: Request,
+  env: SofsBackendEnv,
+  subAction: 'start' | 'autosave' | 'violation' | 'submit'
+): Promise<Response> {
+  const user = await verifyFirebaseIdToken(req, env);
+  if (!user) return errorResponse('Authentication required.', 401);
+
+  const supabase = createServiceSupabase(env);
+  if (!supabase) {
+    return errorResponse('Supabase backend is not configured for server exam enforcement.', 503);
+  }
+
+  let body: Record<string, any>;
+  try {
+    body = (await req.json()) as Record<string, any>;
+  } catch {
+    return errorResponse('Invalid JSON payload.', 400);
+  }
+
+  const student = await ensureStudentRecord(supabase, user);
+
+  if (subAction === 'start') {
+    const examId = String(body.examId || '');
+    if (!examId) return errorResponse('examId is required.', 400);
+
+    const { data: exam } = await supabase.from('exams').select('*').eq('id', examId).maybeSingle();
+    if (!exam || !exam.is_published) return errorResponse('Exam is unavailable.', 404);
+
+    // Check existing attempt first (supports resume after disconnect)
+    let { data: existingAttempt } = await supabase
+      .from('exam_attempts')
+      .select('*')
+      .eq('exam_id', examId)
+      .eq('student_id', student.id)
+      .maybeSingle();
+
+    const { data: eqRows } = await supabase
+      .from('exam_questions')
+      .select('question_id, sort_order')
+      .eq('exam_id', examId)
+      .order('sort_order');
+
+    const questionIds = (eqRows || []).map((r: any) => r.question_id);
+    const { data: qRows } = questionIds.length
+      ? await supabase.from('questions').select('*').in('id', questionIds)
+      : { data: [] };
+
+    if (existingAttempt) {
+      // Guard against page-refresh bypass: if an unsubmitted attempt has a violation > 5s ago or expired timer, finalize immediately server-side
+      if (existingAttempt.status === 'in_progress') {
+        const nowMs = Date.now();
+        const violationMs = existingAttempt.violation_timestamp
+          ? new Date(existingAttempt.violation_timestamp).getTime()
+          : NaN;
+        const expiresMs = new Date(existingAttempt.expires_at).getTime();
+
+        if (Number.isFinite(violationMs) && nowMs - violationMs >= 5000) {
+          const finalized = await finalizeExamAttemptSubmission(
+            supabase,
+            existingAttempt,
+            student.id,
+            existingAttempt.autosaved_answers || {},
+            {
+              autoSubmitted: true,
+              submissionReason: 'fullscreen_violation',
+              violationReason: existingAttempt.violation_reason || 'Exited fullscreen mode',
+              violationTimestamp: existingAttempt.violation_timestamp,
+            }
+          );
+          if (!finalized.alreadySubmitted && finalized.updatedAttempt) {
+            existingAttempt = finalized.updatedAttempt;
+          }
+        } else if (Number.isFinite(expiresMs) && nowMs >= expiresMs) {
+          const finalized = await finalizeExamAttemptSubmission(
+            supabase,
+            existingAttempt,
+            student.id,
+            existingAttempt.autosaved_answers || {},
+            {
+              autoSubmitted: true,
+              submissionReason: 'time_expired',
+            }
+          );
+          if (!finalized.alreadySubmitted && finalized.updatedAttempt) {
+            existingAttempt = finalized.updatedAttempt;
+          }
+        }
+      }
+
+      return jsonResponse({
+        ok: true,
+        attempt: mapExamAttemptRow(existingAttempt, []),
+        // Never leak answer keys during active/locked exam
+        questions: (qRows || []).map((q: any) =>
+          mapQuestion(q, Boolean(exam.results_published && exam.allow_answer_review))
+        ),
+      });
+    }
+
+    const nowMs = Date.now();
+    const startsMs = new Date(exam.starts_at).getTime();
+    const endsMs = new Date(exam.ends_at).getTime();
+    if (nowMs < startsMs) {
+      return errorResponse('This exam has not opened yet.', 403);
+    }
+    if (nowMs > endsMs) {
+      return errorResponse('The exam submission window has already closed.', 403);
+    }
+
+    const orderedQIds = exam.randomize_questions ? shuffleArray(questionIds) : questionIds;
+    const optionOrders: Record<string, string[]> = {};
+    (qRows || []).forEach((q: any) => {
+      const keys = Array.isArray(q.options) ? q.options.map((o: any) => String(o.key)) : [];
+      optionOrders[q.id] = exam.randomize_options ? shuffleArray(keys) : keys;
+    });
+
+    const durationMs = Number(exam.duration_minutes || 30) * 60 * 1000;
+    const expiresAt = new Date(Math.min(nowMs + durationMs, endsMs)).toISOString();
+
+    const { data: createdAttempt, error: insErr } = await supabase
+      .from('exam_attempts')
+      .insert({
+        exam_id: examId,
+        student_id: student.id,
+        question_order: orderedQIds,
+        option_orders: optionOrders,
+        autosaved_answers: {},
+        expires_at: expiresAt,
+        status: 'in_progress',
+      })
+      .select('*')
+      .single();
+
+    if (insErr) return errorResponse(insErr.message, 500);
+
+    return jsonResponse({
+      ok: true,
+      attempt: mapExamAttemptRow(createdAttempt, []),
+      questions: (qRows || []).map((q: any) => mapQuestion(q, false)),
+    });
+  }
+
+  if (subAction === 'autosave') {
+    const attemptId = String(body.attemptId || '');
+    const autosavedAnswers = body.autosavedAnswers || {};
+    if (!attemptId) return errorResponse('attemptId is required.', 400);
+
+    const { data: attempt } = await supabase
+      .from('exam_attempts')
+      .select('id, student_id, status')
+      .eq('id', attemptId)
+      .maybeSingle();
+
+    if (!attempt || attempt.student_id !== student.id) {
+      return errorResponse('Attempt not found.', 404);
+    }
+    if (attempt.status !== 'in_progress') {
+      return errorResponse('Exam attempt is already submitted.', 409);
+    }
+
+    const savedAt = new Date().toISOString();
+    await supabase
+      .from('exam_attempts')
+      .update({
+        autosaved_answers: autosavedAnswers,
+        last_saved_at: savedAt,
+      })
+      .eq('id', attemptId)
+      .eq('status', 'in_progress');
+
+    return jsonResponse({ ok: true, lastSavedAt: savedAt });
+  }
+
+  if (subAction === 'violation') {
+    const attemptId = String(body.attemptId || '');
+    const violationReason = String(body.violationReason || 'Exited fullscreen mode').trim().slice(0, 240);
+    if (!attemptId) return errorResponse('attemptId is required.', 400);
+
+    const { data: attempt } = await supabase
+      .from('exam_attempts')
+      .select('*')
+      .eq('id', attemptId)
+      .maybeSingle();
+
+    if (!attempt || attempt.student_id !== student.id) {
+      return errorResponse('Attempt not found.', 404);
+    }
+    if (attempt.status !== 'in_progress') {
+      return errorResponse('Exam attempt is already submitted.', 409);
+    }
+
+    // Preserve first recorded violation timestamp so page refreshes cannot extend the 5-second grace period
+    const effectiveTimestamp = attempt.violation_timestamp || new Date().toISOString();
+    const effectiveReason = attempt.violation_reason || violationReason;
+    const updatePayload: Record<string, any> = {
+      violation_reason: effectiveReason,
+      violation_timestamp: effectiveTimestamp,
+      last_saved_at: new Date().toISOString(),
+    };
+    if (body.autosavedAnswers && typeof body.autosavedAnswers === 'object') {
+      updatePayload.autosaved_answers = body.autosavedAnswers;
+    }
+
+    const { error: vErr } = await supabase
+      .from('exam_attempts')
+      .update(updatePayload)
+      .eq('id', attemptId)
+      .eq('status', 'in_progress');
+
+    if (vErr && !isMissingExamLockColumnError(vErr)) {
+      return errorResponse(vErr.message || 'Could not record exam violation.', 500);
+    }
+
+    return jsonResponse({
+      ok: true,
+      violationReason: effectiveReason,
+      violationTimestamp: effectiveTimestamp,
+    });
+  }
+
+  // submit
+  const attemptId = String(body.attemptId || '');
+  const submittedAnswers = (body.answers || {}) as Record<
+    string,
+    { selectedOption?: string; writtenText?: string; attachmentUrl?: string }
+  >;
+  const autoSubmitted = Boolean(body.autoSubmitted);
+  const rawReason = String(body.submissionReason || '').trim();
+  const submissionReason: ExamSubmissionReason =
+    rawReason === 'fullscreen_violation'
+      ? 'fullscreen_violation'
+      : rawReason === 'time_expired' || autoSubmitted
+      ? 'time_expired'
+      : 'normal';
+
+  const { data: attempt } = await supabase
+    .from('exam_attempts')
+    .select('*')
+    .eq('id', attemptId)
+    .maybeSingle();
+
+  if (!attempt || attempt.student_id !== student.id) {
+    return errorResponse('Exam attempt not found.', 404);
+  }
+  if (attempt.status !== 'in_progress') {
+    return errorResponse('This exam attempt has already been submitted.', 409);
+  }
+
+  const finalized = await finalizeExamAttemptSubmission(supabase, attempt, student.id, submittedAnswers, {
+    autoSubmitted: autoSubmitted || submissionReason !== 'normal',
+    submissionReason,
+    violationReason: body.violationReason ? String(body.violationReason) : undefined,
+    violationTimestamp: body.violationTimestamp ? String(body.violationTimestamp) : undefined,
+  });
+
+  if (finalized.alreadySubmitted) {
+    return errorResponse('This exam attempt has already been submitted.', 409);
+  }
+
+  return jsonResponse({
+    ok: true,
+    status: finalized.status,
+    submissionReason: finalized.submissionReason,
+    violationReason: finalized.violationReason,
+    violationTimestamp: finalized.violationTimestamp,
+    submittedAt: finalized.submittedAt,
+    resultPublished: finalized.resultPublished,
+    result: finalized.result,
   });
 }
 
@@ -1520,20 +1720,9 @@ async function handleAdminWorkspace(req: Request, env: SofsBackendEnv): Promise<
     })),
     questions: (questionsRes.data || []).map((q: any) => mapQuestion(q, true)),
     exams: (examsRes.data || []).map((e: any) => mapExam(e, eqByExam.get(e.id) || [])),
-    attempts: (attemptsRes.data || []).map((a: any) => ({
-      id: a.id,
-      examId: a.exam_id,
-      studentId: a.student_id,
-      questionOrder: a.question_order || [],
-      optionOrders: a.option_orders || {},
-      autosavedAnswers: a.autosaved_answers || {},
-      answers: answersByAttempt.get(a.id) || [],
-      startedAt: a.started_at,
-      expiresAt: a.expires_at,
-      lastSavedAt: a.last_saved_at,
-      submittedAt: a.submitted_at || undefined,
-      status: a.status,
-    })),
+    attempts: (attemptsRes.data || []).map((a: any) =>
+      mapExamAttemptRow(a, answersByAttempt.get(a.id) || [])
+    ),
     results: (resultsRes.data || []).map((r: any) => mapResult(r, studentMap, batchMap)),
     resources: (resourcesRes.data || []).map(mapResource),
     notices: (noticesRes.data || []).map(mapNotice),
@@ -2375,6 +2564,9 @@ export async function handleSofsApiRequest(req: Request, env: SofsBackendEnv): P
   }
   if (route === 'student/exams/autosave' && req.method === 'POST') {
     return handleStudentExamAction(req, env, 'autosave');
+  }
+  if (route === 'student/exams/violation' && req.method === 'POST') {
+    return handleStudentExamAction(req, env, 'violation');
   }
   if (route === 'student/exams/submit' && req.method === 'POST') {
     return handleStudentExamAction(req, env, 'submit');

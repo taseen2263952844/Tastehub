@@ -255,6 +255,8 @@ export interface ExamAnswerRecord {
   gradedBy?: string;
 }
 
+export type ExamSubmissionReason = 'normal' | 'fullscreen_violation' | 'time_expired';
+
 export interface ExamAttempt {
   id: string;
   examId: string;
@@ -268,6 +270,9 @@ export interface ExamAttempt {
   lastSavedAt: string;
   submittedAt?: string;
   status: 'in_progress' | 'submitted' | 'auto_submitted' | 'graded';
+  submissionReason?: ExamSubmissionReason;
+  violationReason?: string;
+  violationTimestamp?: string;
 }
 
 export interface ExamResult {

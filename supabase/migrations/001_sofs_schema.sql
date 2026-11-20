@@ -316,6 +316,9 @@ CREATE TABLE IF NOT EXISTS public.exam_attempts (
   last_saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   submitted_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'submitted', 'auto_submitted', 'graded')),
+  submission_reason TEXT NOT NULL DEFAULT 'normal' CHECK (submission_reason IN ('normal', 'fullscreen_violation', 'time_expired')),
+  violation_reason TEXT NOT NULL DEFAULT '',
+  violation_timestamp TIMESTAMPTZ,
   UNIQUE (exam_id, student_id)
 );
 

@@ -1,10 +1,17 @@
 import React, { useState } from 'react';
-import { Award, CheckCircle2, Eye, Lock } from 'lucide-react';
+import { Award, CheckCircle2, Eye, Lock, ShieldAlert, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { ExamAttempt } from '../../types';
+import {
+  ExamAttemptDisplayKey,
+  getExamAttemptStatusMeta,
+} from '../../utils/examStatus';
 
 export const ResultsGradingSection: React.FC = () => {
   const { exams, attempts, results, questions, students, adminUpsert } = useApp();
   const [selectedExamId, setSelectedExamId] = useState(exams[0]?.id || '');
+  const [attemptFilter, setAttemptFilter] = useState<'all' | ExamAttemptDisplayKey>('all');
+  const [inspectedAttempt, setInspectedAttempt] = useState<ExamAttempt | null>(null);
   const [gradingDraft, setGradingDraft] = useState<
     Record<string, { marks: number; feedback: string }>
   >({});
@@ -12,6 +19,9 @@ export const ResultsGradingSection: React.FC = () => {
   const exam = exams.find((e) => e.id === selectedExamId) || exams[0];
   const examResults = results.filter((r) => !exam || r.examId === exam.id);
   const examAttempts = attempts.filter((a) => !exam || a.examId === exam.id);
+  const filteredAttempts = examAttempts.filter((a) =>
+    attemptFilter === 'all' ? true : getExamAttemptStatusMeta(a).key === attemptFilter
+  );
   const writtenQuestions = exam
     ? questions.filter((q) => exam.questionIds.includes(q.id) && q.questionType === 'written')
     : [];
@@ -101,6 +111,103 @@ export const ResultsGradingSection: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Exam Attempt Status & Fullscreen Violation Monitor */}
+      <div className="bg-white border border-[#DCE2DC] rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#111915] flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-[#0F3D2E]" />
+              <span>Exam Attempt Status &amp; Fullscreen Proctoring Log</span>
+            </h3>
+            <p className="text-xs text-[#4E5B53]">
+              Track normal submissions, fullscreen violation auto-submissions, time expirations, and active attempts.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { id: 'all', label: `All (${examAttempts.length})` },
+              { id: 'completed_normal', label: 'Completed normally' },
+              { id: 'fullscreen_violation', label: 'Fullscreen Violation' },
+              { id: 'time_expired', label: 'Time expired' },
+              { id: 'in_progress', label: 'In progress' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setAttemptFilter(f.id as any)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${
+                  attemptFilter === f.id
+                    ? 'bg-[#0F3D2E] text-white border-[#0F3D2E]'
+                    : 'bg-[#F8F9F7] text-[#4E5B53] border-[#DCE2DC]'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filteredAttempts.length === 0 ? (
+          <p className="text-xs text-[#4E5B53]">No exam attempts match the selected filter.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#DCE2DC] text-[#4E5B53]">
+                  <th className="py-2 pr-4">Student</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Violation Timestamp</th>
+                  <th className="py-2 pr-4">Submitted At</th>
+                  <th className="py-2 pr-2">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAttempts.map((att) => {
+                  const st = students.find((s) => s.id === att.studentId);
+                  const meta = getExamAttemptStatusMeta(att);
+                  return (
+                    <tr key={att.id} className="border-b border-[#EEF2EE]">
+                      <td className="py-2.5 pr-4">
+                        <p className="font-semibold text-[#111915]">
+                          {st?.fullName || att.studentId}
+                        </p>
+                        {st?.studentCode && (
+                          <p className="text-[11px] font-mono text-[#4E5B53]">{st.studentCode}</p>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-1 rounded-lg border text-[11px] font-semibold ${meta.badgeClass}`}
+                        >
+                          {meta.label}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 tabular-nums text-[#4E5B53]">
+                        {att.violationTimestamp
+                          ? new Date(att.violationTimestamp).toLocaleString()
+                          : '—'}
+                      </td>
+                      <td className="py-2.5 pr-4 tabular-nums text-[#4E5B53]">
+                        {att.submittedAt ? new Date(att.submittedAt).toLocaleString() : '—'}
+                      </td>
+                      <td className="py-2.5 pr-2">
+                        <button
+                          type="button"
+                          onClick={() => setInspectedAttempt(att)}
+                          className="px-2.5 py-1 rounded-lg border border-[#DCE2DC] text-[11px] font-semibold text-[#0F3D2E] hover:bg-[#EEF2EE]"
+                        >
+                          View Details
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Manual Written Grading Workspace */}
       {writtenQuestions.length > 0 && examAttempts.length > 0 && (
@@ -266,6 +373,106 @@ export const ResultsGradingSection: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Violation / Submission Details Modal */}
+      {inspectedAttempt && (() => {
+        const st = students.find((s) => s.id === inspectedAttempt.studentId);
+        const ex = exams.find((e) => e.id === inspectedAttempt.examId);
+        const meta = getExamAttemptStatusMeta(inspectedAttempt);
+        const answeredTotal = Object.values(inspectedAttempt.autosavedAnswers || {}).filter(
+          (v) => Boolean(v?.selectedOption?.trim() || v?.writtenText?.trim())
+        ).length;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-white border border-[#DCE2DC] rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-start justify-between gap-3 border-b border-[#DCE2DC] pb-3">
+                <div>
+                  <h4 className="font-serif text-lg font-bold text-[#111915]">
+                    Exam Submission &amp; Violation Details
+                  </h4>
+                  <p className="text-xs text-[#4E5B53]">{ex?.title || inspectedAttempt.examId}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectedAttempt(null)}
+                  className="p-1.5 rounded-lg border border-[#DCE2DC] text-[#4E5B53] hover:text-[#111915]"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Candidate</span>
+                  <span className="font-semibold text-[#111915]">
+                    {st?.fullName || inspectedAttempt.studentId}{' '}
+                    {st?.studentCode ? `(${st.studentCode})` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Status</span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-lg border font-semibold ${meta.badgeClass}`}
+                  >
+                    {meta.label}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Submission Reason</span>
+                  <span className="font-semibold text-[#111915] text-right">
+                    {meta.reasonLabel}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Violation Timestamp</span>
+                  <span className="font-mono tabular-nums text-[#111915]">
+                    {inspectedAttempt.violationTimestamp
+                      ? new Date(inspectedAttempt.violationTimestamp).toLocaleString()
+                      : 'None recorded'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Started At</span>
+                  <span className="font-mono tabular-nums text-[#111915]">
+                    {new Date(inspectedAttempt.startedAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Last Autosaved</span>
+                  <span className="font-mono tabular-nums text-[#111915]">
+                    {new Date(inspectedAttempt.lastSavedAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Submitted At</span>
+                  <span className="font-mono tabular-nums text-[#111915]">
+                    {inspectedAttempt.submittedAt
+                      ? new Date(inspectedAttempt.submittedAt).toLocaleString()
+                      : 'Not submitted yet'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#4E5B53]">Questions Answered</span>
+                  <span className="font-mono tabular-nums font-semibold text-[#111915]">
+                    {answeredTotal} / {inspectedAttempt.questionOrder.length || answeredTotal}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setInspectedAttempt(null)}
+                  className="px-4 py-2 rounded-xl bg-[#0F3D2E] text-white text-xs font-semibold"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -13,6 +13,7 @@ import { useApp } from '../../context/AppContext';
 import { Question } from '../../types';
 import { MathDiagramRenderer } from '../MathDiagramRenderer';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { getExamAttemptStatusMeta } from '../../utils/examStatus';
 
 export const ExamsQuestionsSection: React.FC = () => {
   const {
@@ -915,6 +916,7 @@ export const ExamsQuestionsSection: React.FC = () => {
                     <th className="py-2 pr-4">Student</th>
                     <th className="py-2 pr-4">Exam</th>
                     <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4">Violation Info</th>
                     <th className="py-2 pr-4">Started</th>
                     <th className="py-2 pr-4">Last Saved</th>
                   </tr>
@@ -923,12 +925,31 @@ export const ExamsQuestionsSection: React.FC = () => {
                   {attempts.map((a) => {
                     const st = students.find((s) => s.id === a.studentId);
                     const ex = exams.find((e) => e.id === a.examId);
+                    const meta = getExamAttemptStatusMeta(a);
                     return (
                       <tr key={a.id} className="border-b border-[#EEF2EE]">
                         <td className="py-2.5 pr-4 font-semibold">{st?.fullName || a.studentId}</td>
                         <td className="py-2.5 pr-4">{ex?.title || a.examId}</td>
-                        <td className="py-2.5 pr-4 uppercase font-semibold text-[#0F3D2E]">
-                          {a.status.replace('_', ' ')}
+                        <td className="py-2.5 pr-4">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded border text-[11px] font-semibold ${meta.badgeClass}`}
+                          >
+                            {meta.label}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-4 text-[11px] text-[#4E5B53]">
+                          {a.violationTimestamp ? (
+                            <div>
+                              <p className="font-semibold text-red-800">
+                                {a.violationReason || 'Exited fullscreen'}
+                              </p>
+                              <p className="tabular-nums">
+                                {new Date(a.violationTimestamp).toLocaleString()}
+                              </p>
+                            </div>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="py-2.5 pr-4 tabular-nums">
                           {new Date(a.startedAt).toLocaleString()}

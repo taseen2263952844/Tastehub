@@ -17,6 +17,7 @@ import {
   Question,
   Exam,
   ExamAttempt,
+  ExamSubmissionReason,
   ExamResult,
   StudyResource,
   Notice,
@@ -28,6 +29,7 @@ import {
   AuditLog,
   AuthUser,
 } from '../types';
+import { requestExamFullscreen } from '../utils/examFullscreen';
 import {
   INITIAL_SITE_SETTINGS,
   INITIAL_ADMIN_USERS,
@@ -183,10 +185,26 @@ interface AppContextValue {
     attemptId: string,
     autosavedAnswers: Record<string, { selectedOption?: string; writtenText?: string; attachmentUrl?: string }>
   ) => Promise<void>;
+  reportExamViolation: (
+    attemptId: string,
+    violationReason: string,
+    options?: {
+      autosavedAnswers?: Record<string, { selectedOption?: string; writtenText?: string; attachmentUrl?: string }>;
+      keepalive?: boolean;
+    }
+  ) => Promise<{ violationReason: string; violationTimestamp: string }>;
   submitExamAttempt: (
     attemptId: string,
     answers: Record<string, { selectedOption?: string; writtenText?: string; attachmentUrl?: string }>,
-    autoSubmitted?: boolean
+    options?:
+      | boolean
+      | {
+          autoSubmitted?: boolean;
+          submissionReason?: ExamSubmissionReason;
+          violationReason?: string;
+          violationTimestamp?: string;
+          keepalive?: boolean;
+        }
   ) => Promise<{ resultPublished: boolean; result: ExamResult | null }>;
   markNotificationsRead: () => Promise<void>;
   createSupportTicket: (subject: string, category: string, priority: 'low' | 'normal' | 'high', initialMessage: string) => Promise<void>;
@@ -632,9 +650,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const openExamWorkspace = (examId: string) => {
+    // Invoke fullscreen synchronously from the student's click gesture
+    void requestExamFullscreen();
     setActiveExamId(examId);
     setView('exam');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'auto' });
   };
 
   const loginWithGoogle = async () => {
@@ -789,15 +809,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const reportExamViolation: AppContextValue['reportExamViolation'] = async (
+    attemptId,
+    violationReason,
+    options
+  ) => {
+    const fallbackTimestamp = new Date().toISOString();
+    if (supabaseConfigured) {
+      const res = await sofsApiFetch<{ violationReason: string; violationTimestamp: string }>(
+        'student/exams/violation',
+        {
+          method: 'POST',
+          body: {
+            attemptId,
+            violationReason,
+            ...(options?.autosavedAnswers ? { autosavedAnswers: options.autosavedAnswers } : {}),
+          },
+          requireAuth: true,
+          keepalive: Boolean(options?.keepalive),
+        }
+      );
+      setAttempts((prev) =>
+        prev.map((a) =>
+          a.id === attemptId
+            ? {
+                ...a,
+                violationReason: a.violationReason || res.violationReason || violationReason,
+                violationTimestamp: a.violationTimestamp || res.violationTimestamp || fallbackTimestamp,
+                ...(options?.autosavedAnswers ? { autosavedAnswers: options.autosavedAnswers } : {}),
+              }
+            : a
+        )
+      );
+      return res;
+    }
+
+    let resolvedReason = violationReason;
+    let resolvedTimestamp = fallbackTimestamp;
+    setAttempts((prev) =>
+      prev.map((a) => {
+        if (a.id !== attemptId) return a;
+        resolvedReason = a.violationReason || violationReason;
+        resolvedTimestamp = a.violationTimestamp || fallbackTimestamp;
+        return {
+          ...a,
+          violationReason: resolvedReason,
+          violationTimestamp: resolvedTimestamp,
+          ...(options?.autosavedAnswers ? { autosavedAnswers: options.autosavedAnswers } : {}),
+        };
+      })
+    );
+    return { violationReason: resolvedReason, violationTimestamp: resolvedTimestamp };
+  };
+
   const submitExamAttempt: AppContextValue['submitExamAttempt'] = async (
     attemptId,
     answers,
-    autoSubmitted = false
+    submitOptions = false
   ) => {
+    const normalizedOpts =
+      typeof submitOptions === 'boolean' ? { autoSubmitted: submitOptions } : submitOptions;
+    const autoSubmitted = Boolean(
+      normalizedOpts.autoSubmitted ||
+        (normalizedOpts.submissionReason && normalizedOpts.submissionReason !== 'normal')
+    );
+    const submissionReason: ExamSubmissionReason =
+      normalizedOpts.submissionReason || (autoSubmitted ? 'time_expired' : 'normal');
+
     if (supabaseConfigured) {
       const res = await sofsApiFetch<{ resultPublished: boolean; result: ExamResult | null }>(
         'student/exams/submit',
-        { method: 'POST', body: { attemptId, answers, autoSubmitted }, requireAuth: true }
+        {
+          method: 'POST',
+          body: {
+            attemptId,
+            answers,
+            autoSubmitted,
+            submissionReason,
+            violationReason: normalizedOpts.violationReason,
+            violationTimestamp: normalizedOpts.violationTimestamp,
+          },
+          requireAuth: true,
+          keepalive: Boolean(normalizedOpts.keepalive),
+        }
       );
       await refreshBackendData();
       return res;
@@ -865,6 +959,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               answers: answerRecords,
               submittedAt,
               status: autoSubmitted ? 'auto_submitted' : 'submitted',
+              submissionReason,
+              violationReason:
+                submissionReason === 'fullscreen_violation'
+                  ? a.violationReason || normalizedOpts.violationReason || 'Exited fullscreen mode'
+                  : a.violationReason,
+              violationTimestamp:
+                submissionReason === 'fullscreen_violation'
+                  ? a.violationTimestamp || normalizedOpts.violationTimestamp || submittedAt
+                  : a.violationTimestamp,
             }
           : a
       )
@@ -1374,6 +1477,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateStudentProfile,
         startOrResumeExam,
         autosaveExamAnswers,
+        reportExamViolation,
         submitExamAttempt,
         markNotificationsRead,
         createSupportTicket,

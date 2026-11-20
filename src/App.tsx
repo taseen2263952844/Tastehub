@@ -22,9 +22,11 @@ import { AdmissionModal } from './components/AdmissionModal';
 const SofsRouter: React.FC = () => {
   const { view } = useApp();
 
+  const isExamMode = view === 'exam';
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9F7] text-[#111915]">
-      <Header />
+      {!isExamMode && <Header />}
       <main className="flex-1">
         {view === 'home' && <HomeView />}
         {view === 'about' && <AboutView />}
@@ -39,7 +41,7 @@ const SofsRouter: React.FC = () => {
         {view === 'exam' && <ExamTakingWorkspace />}
         {view === 'admin' && <AdminDashboard />}
       </main>
-      <Footer />
+      {!isExamMode && <Footer />}
       <AuthModal />
       <AdmissionModal />
     </div>

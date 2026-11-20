@@ -19,6 +19,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { ExamResult } from '../types';
 import { ResultCardView } from './ResultCardView';
+import { getExamAttemptStatusMeta } from '../utils/examStatus';
 
 type PortalTab =
   | 'overview'
@@ -300,8 +301,12 @@ export const StudentPortalView: React.FC = () => {
                         </p>
                       </div>
                       {finished ? (
-                        <span className="text-xs font-semibold text-[#0F3D2E] shrink-0">
-                          Submitted
+                        <span
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border shrink-0 ${
+                            getExamAttemptStatusMeta(att!).badgeClass
+                          }`}
+                        >
+                          {getExamAttemptStatusMeta(att!).label}
                         </span>
                       ) : (
                         <button
@@ -475,8 +480,13 @@ export const StudentPortalView: React.FC = () => {
                   <div className="pt-3 border-t border-[#DCE2DC] flex items-center justify-between">
                     {att && att.status !== 'in_progress' ? (
                       <>
-                        <span className="text-xs font-semibold text-[#0F3D2E] inline-flex items-center gap-1">
-                          <CheckCircle2 className="w-4 h-4" /> Completed ({att.status.replace('_', ' ')})
+                        <span
+                          className={`text-xs font-semibold inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
+                            getExamAttemptStatusMeta(att).badgeClass
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{getExamAttemptStatusMeta(att).label}</span>
                         </span>
                         {res && (
                           <button
@@ -493,14 +503,19 @@ export const StudentPortalView: React.FC = () => {
                     ) : isAfter && !att ? (
                       <span className="text-xs text-red-700">Submission window closed</span>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => openExamWorkspace(ex.id)}
-                        className="px-5 py-2.5 rounded-xl bg-[#0F3D2E] text-white text-xs font-semibold inline-flex items-center gap-1.5"
-                      >
-                        <Play className="w-3.5 h-3.5" />
-                        <span>{att?.status === 'in_progress' ? 'Resume Exam' : 'Start Exam'}</span>
-                      </button>
+                      <div className="w-full flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] text-[#4E5B53]">
+                          Fullscreen lock active during exam
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openExamWorkspace(ex.id)}
+                          className="px-5 py-2.5 rounded-xl bg-[#0F3D2E] text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          <span>{att?.status === 'in_progress' ? 'Resume Exam' : 'Start Exam'}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

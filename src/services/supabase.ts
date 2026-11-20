@@ -34,6 +34,7 @@ export async function sofsApiFetch<T = any>(
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
     body?: unknown;
     requireAuth?: boolean;
+    keepalive?: boolean;
   } = {}
 ): Promise<T> {
   const method = options.method || 'GET';
@@ -65,6 +66,7 @@ export async function sofsApiFetch<T = any>(
     method,
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    keepalive: Boolean(options.keepalive),
   });
 
   const text = await response.text();
